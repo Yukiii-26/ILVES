@@ -70,6 +70,9 @@ namespace Ilves.UI
         bool _hasSave;
         SlotMode _slotMode = SlotMode.Load;
         bool _noSavePrefs;
+        bool _bigFont;
+        int _sideFontSize = 18;
+        int _sideRowH = 27;
         Phase _slotReturn = Phase.Title;
         readonly List<SaveData> _slotMeta = new List<SaveData>();
 
@@ -89,6 +92,8 @@ namespace Ilves.UI
 
         void Start()
         {
+            if (HasArg("-bigfont")) _bigFont = true;
+
             string resArg = ArgValue("-res");
             if (!string.IsNullOrEmpty(resArg))
             {
@@ -161,6 +166,7 @@ namespace Ilves.UI
         {
             _resIndex = Mathf.Clamp(PlayerPrefs.GetInt("ilves.res", 0), 0, 2);
             _fullscreen = PlayerPrefs.GetInt("ilves.fullscreen", 0) == 1;
+            _bigFont = PlayerPrefs.GetInt("ilves.bigfont", 1) == 1;   // 默认大字号：1280×720 下中文更清楚
         }
 
         void ApplyDisplay()
@@ -179,6 +185,13 @@ namespace Ilves.UI
                 PlayerPrefs.SetInt("ilves.fullscreen", _fullscreen ? 1 : 0);
                 PlayerPrefs.Save();
             }
+        }
+
+        void ApplyFontSetting()
+        {
+            PlayerPrefs.SetInt("ilves.bigfont", _bigFont ? 1 : 0);
+            PlayerPrefs.Save();
+            _stylesReady = false;
         }
 
         void LoadFont()
@@ -210,9 +223,11 @@ namespace Ilves.UI
             _title.normal.textColor = Olive;
             _subtitle = new GUIStyle(_body) { fontSize = 22, alignment = TextAnchor.MiddleCenter };
             _subtitle.normal.textColor = Dim;
-            _section = new GUIStyle(_body) { fontSize = 13 };
+            _section = new GUIStyle(_body) { fontSize = _bigFont ? 16 : 14 };
             _section.normal.textColor = OliveDim;
-            _side = new GUIStyle(_body) { fontSize = 16, wordWrap = false };
+            _sideFontSize = _bigFont ? 21 : 18;
+            _sideRowH = _bigFont ? 32 : 27;
+            _side = new GUIStyle(_body) { fontSize = _sideFontSize, wordWrap = false };
             _side.normal.textColor = Bone;
             _sideDim = new GUIStyle(_side);
             _sideDim.normal.textColor = Dim;
@@ -221,7 +236,7 @@ namespace Ilves.UI
             _verdict.normal.textColor = Olive;
             _button = new GUIStyle(_body) { fontSize = 19, alignment = TextAnchor.MiddleCenter, wordWrap = false };
             _button.normal.textColor = Bone;
-            _hint = new GUIStyle(_bodySmall);
+            _hint = new GUIStyle(_bodySmall) { fontSize = _bigFont ? 18 : 16 };
             _hint.normal.textColor = OliveDim;
             _stylesReady = true;
         }
@@ -573,8 +588,12 @@ namespace Ilves.UI
             if (Button(new Rect(80, 330, 340, 52), "窗 口", !_fullscreen)) { _fullscreen = false; ApplyDisplay(); }
             if (Button(new Rect(80 + 380f, 330, 340, 52), "全 屏", _fullscreen)) { _fullscreen = true; ApplyDisplay(); }
 
-            Label(new Rect(80, 420, W - 160, 24), "提示：界面按 16:9 等比缩放；窗口模式会自动限制在屏幕的 90% 以内，避免窗口超出屏幕。", _hint);
-            if (Button(new Rect(W * 0.5f - 160f, 560, 320, 46), "返 回")) _phase = _settingsReturn;
+            Label(new Rect(80, 400, 400, 30), "界 面 字 号（右侧状态栏）", _section);
+            if (Button(new Rect(80, 430, 340, 52), "标 准", !_bigFont)) { _bigFont = false; ApplyFontSetting(); }
+            if (Button(new Rect(80 + 380f, 430, 340, 52), "大（推荐 1440p 以上）", _bigFont)) { _bigFont = true; ApplyFontSetting(); }
+
+            Label(new Rect(80, 520, W - 160, 24), "提示：界面按 16:9 等比缩放；窗口模式会自动限制在屏幕的 90% 以内，避免窗口超出屏幕。", _hint);
+            if (Button(new Rect(W * 0.5f - 160f, 600, 320, 46), "返 回")) _phase = _settingsReturn;
         }
 
         // ---------- 任务简报 ----------
@@ -677,34 +696,36 @@ namespace Ilves.UI
 
         void DrawSidebar()
         {
-            float x = 844f, y = 96f, w = 380f;   // 右边界 1224，两侧留白
-            float right = x + w - 32f;
-            Fill(new Rect(x, y, w, H - y - 40f), Panel);
-            Fill(new Rect(x, y, 1f, H - y - 40f), OliveDim);
-            Fill(new Rect(x + w - 1f, y, 1f, H - y - 40f), OliveDim);
+            float x = 820f, y = 96f, w = 404f;   // 右边界 1224，两侧留白
+            float right = x + w - 36f;
+            float bottom = H - 40f;
+            Fill(new Rect(x, y, w, bottom - y), Panel);
+            Fill(new Rect(x, y, 1f, bottom - y), OliveDim);
+            Fill(new Rect(x + w - 1f, y, 1f, bottom - y), OliveDim);
 
-            float cy = y + 16f;
-            Label(new Rect(x + 28, cy, w - 40, 20), "小队状态  ·  9 人", _section);
-            cy += 26f;
+            int rh = _sideRowH;
+            float cy = y + 18f;
+            Label(new Rect(x + 32, cy, w - 64, rh), "小队状态  ·  9 人", _section);
+            cy += rh + 6f;
 
-            Label(new Rect(x + 28, cy, 140, 20), "暴露度", _sideDim);
+            Label(new Rect(x + 32, cy, 170, rh), "暴露度", _sideDim);
             var exSt = new GUIStyle(_side) { alignment = TextAnchor.MiddleRight };
             exSt.normal.textColor = _state.Exposure >= 60 ? Danger : Bone;
-            Label(new Rect(right - 170, cy, 170, 20), _state.Exposure + "  " + _state.ExposureLabel(), exSt);
-            cy += 24f;
-            Fill(new Rect(x + 28, cy, w - 60, 6), new Color(0.14f, 0.145f, 0.11f));
-            Fill(new Rect(x + 28, cy, (w - 60) * Mathf.Clamp01(_state.Exposure / 100f), 6), _state.Exposure >= 60 ? Danger : Olive);
-            cy += 24f;
+            Label(new Rect(right - 190, cy, 190, rh), _state.Exposure + "  " + _state.ExposureLabel(), exSt);
+            cy += rh;
+            Fill(new Rect(x + 32, cy + 2, w - 72, 6), new Color(0.14f, 0.145f, 0.11f));
+            Fill(new Rect(x + 32, cy + 2, (w - 72) * Mathf.Clamp01(_state.Exposure / 100f), 6), _state.Exposure >= 60 ? Danger : Olive);
+            cy += rh + 8f;
 
-            Label(new Rect(x + 28, cy, 160, 20), "情报完整度", _sideDim);
-            Label(new Rect(right - 110, cy, 110, 20), _state.Intel + " / 6", new GUIStyle(_side) { alignment = TextAnchor.MiddleRight });
-            cy += 24f;
+            Label(new Rect(x + 32, cy, 190, rh), "情报完整度", _sideDim);
+            Label(new Rect(right - 120, cy, 120, rh), _state.Intel + " / 6", new GUIStyle(_side) { alignment = TextAnchor.MiddleRight });
+            cy += rh;
 
-            Label(new Rect(x + 28, cy, 160, 20), "队伍信任", _sideDim);
-            Label(new Rect(right - 110, cy, 110, 20), (_state.Trust >= 0 ? "+" : "") + _state.Trust, new GUIStyle(_side) { alignment = TextAnchor.MiddleRight });
-            cy += 32f;
-            Fill(new Rect(x + 28, cy, w - 60, 1), OliveDim);
-            cy += 14f;
+            Label(new Rect(x + 32, cy, 190, rh), "队伍信任", _sideDim);
+            Label(new Rect(right - 120, cy, 120, rh), (_state.Trust >= 0 ? "+" : "") + _state.Trust, new GUIStyle(_side) { alignment = TextAnchor.MiddleRight });
+            cy += rh + 10f;
+            Fill(new Rect(x + 32, cy, w - 72, 1), OliveDim);
+            cy += 12f;
 
             for (int i = 0; i < GameState.MemberIds.Length; i++)
             {
@@ -712,26 +733,27 @@ namespace Ilves.UI
                 string status = _state.MemberStatus(id);
                 var nameSt = new GUIStyle(_side);
                 nameSt.normal.textColor = (id == "vasili") ? Olive : Bone;
-                Label(new Rect(x + 28, cy, 150, 20), GameState.MemberNames[i] + (id == "vasili" ? " (你)" : ""), nameSt);
+                Label(new Rect(x + 32, cy, 200, rh), GameState.MemberNames[i] + (id == "vasili" ? " (你)" : ""), nameSt);
                 var stSt = new GUIStyle(_side) { alignment = TextAnchor.MiddleRight };
                 stSt.normal.textColor = StatusColor(status);
-                Label(new Rect(right - 150, cy, 150, 20), status, stSt);
-                cy += 25f;
+                Label(new Rect(right - 150, cy, 150, rh), status, stSt);
+                cy += rh;
             }
 
             if (_toasts.Count > 0)
             {
-                float ty = H - 130f;
-                for (int i = 0; i < _toasts.Count; i++)
+                float ty = bottom - 58f;
+                for (int i = 0; i < _toasts.Count && i < 3; i++)
                 {
                     var st = new GUIStyle(_hint);
                     st.normal.textColor = Olive;
-                    Label(new Rect(x + 28, ty + i * 20f, w - 40, 20), "+ " + _toasts[i], st);
+                    Label(new Rect(x + 32, ty + i * 20f, w - 40, 20), "+ " + _toasts[i], st);
                 }
             }
-
-            if (!string.IsNullOrEmpty(_transient))
-                Label(new Rect(x + 28, H - 150f, w - 40, 20), _transient, _hint);
+            else if (!string.IsNullOrEmpty(_transient))
+            {
+                Label(new Rect(x + 32, bottom - 34f, w - 40, 22), _transient, _hint);
+            }
         }
 
         static Color StatusColor(string status)
@@ -760,7 +782,7 @@ namespace Ilves.UI
                 var d = i < _slotMeta.Count ? _slotMeta[i] : null;
                 Fill(r, Panel);
                 Fill(new Rect(r.x, r.y, 3f, r.height), d != null ? Olive : OliveDim);
-                Label(new Rect(r.x + 28, r.y + 16, 140, 24), SlotNames[i], _speaker);
+                Label(new Rect(r.x + 32, r.y + 16, 140, 24), SlotNames[i], _speaker);
                 if (d == null)
                 {
                     Label(new Rect(r.x + 180, r.y + 16, 520, 24), "（空档位）", _hint);
