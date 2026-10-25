@@ -70,6 +70,9 @@ namespace Ilves.Core
                 var c = raw.Trim();
                 bool neg = c.StartsWith("!");
                 if (neg) c = c.Substring(1).Trim();
+                // effects 里写 "flag.x=true"，EffectParser 存旗标时剥掉了 "flag." 前缀；
+                // visibleIf 兼容两种写法（"flag.x" 与 "x"），否则第一章 n11 之类永远不可见。
+                if (c.StartsWith("flag.", StringComparison.Ordinal)) c = c.Substring(5).Trim();
                 bool has = state != null && state.GetFlag(c);
                 if (neg ? has : !has) return false;
             }

@@ -48,6 +48,22 @@ namespace Ilves.UI
         List<StoryChoice> _choices = new List<StoryChoice>();
         bool _overChoice;
 
+        // 章节基准钟点（剧情里的「03:10 / 15:20」由 clockStart 提供，分钟数仍存在 GameState）
+        bool _hasChapterClock;
+        int _clockBaseMin;
+        int _minuteBase;
+
+        // 正文分页 / 队员档案弹窗
+        readonly List<string> _pages = new List<string>();
+        int _page;
+        bool _pagesDirty;
+        bool _profileOpen;
+        string _profileId;
+        float _profileScroll;
+        readonly List<MemberData> _members = new List<MemberData>();
+        bool _membersLoaded;
+        string _membersError;
+
         // 退回（最多两步）
         class Snapshot
         {
@@ -87,7 +103,7 @@ namespace Ilves.UI
 
         // 样式
         Font _font;
-        GUIStyle _body, _bodySmall, _scene, _speaker, _title, _subtitle, _section, _side, _sideDim, _choiceBig, _verdict, _button, _hint;
+        GUIStyle _body, _bodySmall, _scene, _speaker, _title, _subtitle, _section, _side, _sideDim, _profileBody, _profileMeta, _choiceBig, _verdict, _button, _hint;
         bool _stylesReady;
 
         // =====================================================================
@@ -98,6 +114,7 @@ namespace Ilves.UI
             var sprite = Resources.Load<Sprite>("emblem");
             _emblem = sprite != null ? sprite.texture : Resources.Load<Texture2D>("emblem");
             LoadSettings();
+            EnsureMembers();
             _autoPath = Path.Combine(Application.persistentDataPath, "save_auto.json");
         }
 
@@ -113,6 +130,18 @@ namespace Ilves.UI
             {
                 int rv;
                 if (int.TryParse(resArg, out rv)) { _resIndex = Mathf.Clamp(rv, 0, 2); _fullscreen = false; _noSavePrefs = true; }
+            }
+
+            // QA：-member=<id> 直接进第一章正文并打开该队员档案（用于三档字号的截图验收）
+            string memberArg = ArgValue("-member");
+            if (!string.IsNullOrEmpty(memberArg) && FindMember(memberArg) != null)
+            {
+                ApplyDisplay();
+                JumpTo("n01", 1, Phase.Story);
+                _textDone = true;
+                _reveal = _fullText != null ? _fullText.Length : 0f;
+                OpenProfile(memberArg);
+                return;
             }
 
             if (HasArg("-autoplay-demo")) { AutoPlay(); return; }
@@ -149,6 +178,7 @@ namespace Ilves.UI
             _history.Clear();
             _chapterIndex = Mathf.Clamp(chapterIndex, 0, ChapterFiles.Length - 1);
             _chapter = LoadChapter(_chapterIndex);
+            ApplyChapterClock(_chapter);
             _engine = new StoryEngine(_chapter);
             if (_engine.Get(node) != null) _engine.GoTo(node);
             EnterNode();
@@ -249,6 +279,8 @@ namespace Ilves.UI
             _side.normal.textColor = Bone;
             _sideDim = new GUIStyle(_side);
             _sideDim.normal.textColor = new Color(0.64f, 0.65f, 0.55f);   // 次级文字提高对比度，小字号下不发虚
+            _profileBody = new GUIStyle(_body) { fontSize = 17 + _fontLevel * 2 };          // 17 / 19 / 21
+            _profileMeta = new GUIStyle(_bodySmall) { fontSize = Mathf.Max(13, _sideFontSize - 2) };
             _choiceBig = new GUIStyle(_body) { fontSize = 20 };
             _verdict = new GUIStyle(_body) { fontSize = 22 };
             _verdict.normal.textColor = Olive;
@@ -296,6 +328,45 @@ namespace Ilves.UI
             }
         }
 
+        /// <summary>进入章节时记下基准：剧情钟点 clockStart + 当时的 GameState.Minutes。</summary>
+        void ApplyChapterClock(StoryChapter ch)
+        {
+            _minuteBase = _state.Minutes;
+            _hasChapterClock = false;
+            _clockBaseMin = 0;
+            if (ch == null) return;
+            int h, m;
+            if (!TryParseClock(ch.clockStart, out h, out m)) return;   // 空 / 格式错 → 回退旧逻辑
+            _clockBaseMin = h * 60 + m;
+            _hasChapterClock = true;
+        }
+
+        /// <summary>解析 "HH:MM"；长度不对、没冒号、非数字、越界都返回 false（不抛异常）。</summary>
+        static bool TryParseClock(string s, out int h, out int m)
+        {
+            h = 0; m = 0;
+            if (string.IsNullOrEmpty(s)) return false;
+            s = s.Trim();
+            int colon = s.IndexOf(':');
+            if (colon <= 0 || colon >= s.Length - 1) return false;
+            string hh = s.Substring(0, colon).Trim();
+            string mm = s.Substring(colon + 1).Trim();
+            if (hh.Length == 0 || hh.Length > 2 || mm.Length == 0 || mm.Length > 2) return false;
+            if (!int.TryParse(hh, out h) || !int.TryParse(mm, out m)) return false;
+            if (h < 0 || h > 23 || m < 0 || m > 59) return false;
+            return true;
+        }
+
+        /// <summary>侧栏时间：章节基准 + 本章已消耗分钟（跨日取模）；没有 clockStart 就用旧的累加钟。</summary>
+        string DisplayClockText()
+        {
+            if (!_hasChapterClock) return _state.ClockText();
+            int total = _clockBaseMin + (_state.Minutes - _minuteBase);
+            int h = ((total / 60) % 24 + 24) % 24;
+            int m = ((total % 60) + 60) % 60;
+            return string.Format("{0:00}:{1:00}", h, m);
+        }
+
         void BeginNewGame()
         {
             _state.Reset();
@@ -308,6 +379,7 @@ namespace Ilves.UI
         {
             _chapter = LoadChapter(_chapterIndex);
             if (_chapter == null) { _phase = Phase.Debrief; return; }
+            ApplyChapterClock(_chapter);
             _engine = new StoryEngine(_chapter);
             _phase = Phase.Briefing;
             AutoSave();
@@ -316,6 +388,7 @@ namespace Ilves.UI
         void StartChapter()
         {
             if (_chapter == null) return;
+            ApplyChapterClock(_chapter);
             _engine = new StoryEngine(_chapter);
             EnterNode();
             _phase = Phase.Story;
@@ -325,10 +398,9 @@ namespace Ilves.UI
         {
             if (_engine == null || _engine.Current == null) { _phase = Phase.Debrief; return; }
             _fullText = _engine.Current.text ?? "";
-            _reveal = 0f;
-            _textDone = string.IsNullOrEmpty(_fullText);
             _choices = _engine.VisibleChoices(_state);
             _overChoice = false;
+            BuildPages(_engine.Current);   // 进入节点（含 Undo / 读档）按当前视口重新分页
         }
 
         void PushHistory()
@@ -343,13 +415,15 @@ namespace Ilves.UI
             if (_history.Count == 0) return;
             var snap = _history[_history.Count - 1];
             _history.RemoveAt(_history.Count - 1);
-            if (snap.chapter != _chapterIndex)
+            bool chapterChanged = snap.chapter != _chapterIndex;
+            if (chapterChanged)
             {
                 _chapterIndex = snap.chapter;
                 _chapter = LoadChapter(_chapterIndex);
                 _engine = new StoryEngine(_chapter);
             }
             _state = snap.state.Clone();
+            if (chapterChanged) ApplyChapterClock(_chapter);   // 跨章退回后钟点按该章起始重算
             _engine.GoTo(snap.node);
             EnterNode();
             _phase = Phase.Story;
@@ -358,13 +432,184 @@ namespace Ilves.UI
 
         void Advance()
         {
-            if (!_textDone) { _reveal = _fullText.Length; _textDone = true; return; }
-            if (_choices != null && _choices.Count > 0) return;
+            if (!_textDone) { FinishPage(); return; }              // 打字中：先打完本页
+            if (_page < _pages.Count - 1) { NextPage(); return; }  // 本页打完且还有下一页：翻页
+            if (_choices != null && _choices.Count > 0) return;    // 只有最后一页能选
             if (_engine == null || _engine.Current == null) return;
             if (_engine.Current.end || string.IsNullOrEmpty(_engine.Current.next)) { EndChapter(); return; }
             PushHistory();
             _engine.GoTo(_engine.Current.next);
             EnterNode();
+        }
+
+        // ---------- 正文分页：一页一屏 ----------
+        /// <summary>正文视口：从文字起点到选项区上沿（选项起点 H-236，再留 10px）。</summary>
+        Rect BodyViewport(StoryNode node)
+        {
+            float bx = 56f, by = 96f, bw = 744f;
+            float ty = by + (node == null || string.IsNullOrEmpty(node.speaker) ? 26f : 58f);
+            float bottom = H - 236f - 10f;
+            return new Rect(bx, ty, bw, Mathf.Max(60f, bottom - ty));
+        }
+
+        string PageText()
+        {
+            if (_pages.Count == 0) return "";
+            return _pages[Mathf.Clamp(_page, 0, _pages.Count - 1)];
+        }
+
+        bool IsLastPage { get { return _pages.Count <= 1 || _page >= _pages.Count - 1; } }
+
+        void FinishPage()
+        {
+            _reveal = PageText().Length;
+            _textDone = true;
+        }
+
+        void NextPage()
+        {
+            if (_page >= _pages.Count - 1) return;
+            _page++;
+            _reveal = 0f;
+            _textDone = string.IsNullOrEmpty(PageText());
+            _overChoice = false;
+        }
+
+        /// <summary>翻页（不推进节点，不处理选项）：打字中先打完本页，否则下一页。</summary>
+        void PageForward()
+        {
+            if (!_textDone) { FinishPage(); return; }
+            if (_page < _pages.Count - 1) NextPage();
+        }
+
+        /// <summary>
+        /// 按当前正文字体与视口把全文切成「一页一屏」：先按空行分段，再贪心塞段；
+        /// 单段超一页时按字符二分找最长前缀，优先切在句末标点后。每页留 5px 余量，宁可多一页不溢出。
+        /// </summary>
+        void BuildPages(StoryNode node)
+        {
+            _pagesDirty = false;
+            _pages.Clear();
+            _page = 0;
+            _reveal = 0f;
+            _textDone = false;
+            string text = _fullText ?? "";
+
+            if (_body == null)
+            {
+                // 样式还没建（Start 里的初始跳转）：先占位，第一次 OnGUI 再真正分页
+                _pagesDirty = true;
+                _pages.Add(text);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(text))
+            {
+                _pages.Add("");
+                _textDone = true;
+                return;
+            }
+
+            Rect viewport = BodyViewport(node);
+            float w = Mathf.Max(20f, viewport.width);
+            float maxH = Mathf.Max(20f, viewport.height - 5f);   // 4–6px 余量
+
+            // 1) 先按空行分段；单段超一页就切成「单页块」，块之间用 newPara 区分是否换段
+            var blocks = new List<string>();
+            var blockNewPara = new List<bool>();
+            string[] paras = text.Split(new[] { "\n\n" }, StringSplitOptions.None);
+            for (int p = 0; p < paras.Length; p++)
+            {
+                string para = paras[p];
+                if (para.Length == 0) continue;
+
+                if (_body.CalcHeight(new GUIContent(para), w) <= maxH)
+                {
+                    blocks.Add(para);
+                    blockNewPara.Add(true);
+                    continue;
+                }
+
+                int start = 0;
+                bool first = true;
+                while (start < para.Length)
+                {
+                    int take = LongestFittingPrefix(para, start, w, maxH);
+                    if (take <= 0) take = 1;
+                    if (start + take < para.Length) take = PreferPunctuationBreak(para, start, take);
+                    if (take <= 0) take = 1;
+                    blocks.Add(para.Substring(start, take));
+                    blockNewPara.Add(first);
+                    first = false;
+                    start += take;
+                }
+            }
+
+            if (blocks.Count == 0)
+            {
+                _pages.Add("");
+                _textDone = true;
+                return;
+            }
+
+            // 2) 贪心把块塞进页
+            var page = new StringBuilder();
+            for (int i = 0; i < blocks.Count; i++)
+            {
+                string candidate = page.Length == 0
+                    ? blocks[i]
+                    : page.ToString() + (blockNewPara[i] ? "\n\n" : "") + blocks[i];
+                if (page.Length == 0 || _body.CalcHeight(new GUIContent(candidate), w) <= maxH)
+                {
+                    page.Length = 0;
+                    page.Append(candidate);
+                }
+                else
+                {
+                    _pages.Add(page.ToString());
+                    page.Length = 0;
+                    page.Append(blocks[i]);
+                }
+            }
+            if (page.Length > 0) _pages.Add(page.ToString());
+            if (_pages.Count == 0) _pages.Add("");
+
+            _page = 0;
+            _reveal = 0f;
+            _textDone = string.IsNullOrEmpty(_pages[0]);
+            Debug.Log("[ILVES-PAGES] node=" + (node != null ? node.id : "?") + " pages=" + _pages.Count
+                      + " viewport=" + Mathf.RoundToInt(viewport.height) + "px");
+        }
+
+        /// <summary>二分找「刚好放得下的最长前缀」长度（从 start 起）。</summary>
+        int LongestFittingPrefix(string s, int start, float w, float maxH)
+        {
+            int lo = 1, hi = s.Length - start, best = 0;
+            while (lo <= hi)
+            {
+                int mid = (lo + hi) / 2;
+                if (_body.CalcHeight(new GUIContent(s.Substring(start, mid)), w) <= maxH)
+                { best = mid; lo = mid + 1; }
+                else hi = mid - 1;
+            }
+            return best;
+        }
+
+        static bool IsPageBreakPunct(char c)
+        {
+            return c == '。' || c == '！' || c == '？' || c == '；' || c == '」' || c == '…';
+        }
+
+        /// <summary>二分截断点不一定是句尾：在尽量靠后的句末标点后断开（至少保留半页）。</summary>
+        int PreferPunctuationBreak(string s, int start, int take)
+        {
+            if (take <= 2) return take;
+            int min = Mathf.Max(1, take / 2);
+            for (int i = start + take - 1; i >= start + min; i--)
+            {
+                if (IsPageBreakPunct(s[i])) return i - start + 1;
+            }
+            return take;
         }
 
         void Select(int index)
@@ -464,6 +709,7 @@ namespace Ilves.UI
                 _chapter = LoadChapter(_chapterIndex);
                 if (_chapter == null) return false;
                 SaveCodec.Apply(data, _state);
+                ApplyChapterClock(_chapter);
                 _history.Clear();
                 _engine = new StoryEngine(_chapter);
                 if (_engine.Get(data.nodeId) != null) _engine.GoTo(data.nodeId);
@@ -528,17 +774,26 @@ namespace Ilves.UI
             {
                 if (!_textDone && !_freezeTyping)
                 {
+                    string pageNow = PageText();
                     _reveal += Time.unscaledDeltaTime * 42f;
-                    if (_reveal >= _fullText.Length) { _reveal = _fullText.Length; _textDone = true; }
+                    if (_reveal >= pageNow.Length) { _reveal = pageNow.Length; _textDone = true; }
+                }
+                // 队员档案弹窗打开时：推进 / 选项 / 暂停全部让路，ESC 只负责关弹窗
+                if (_profileOpen)
+                {
+                    if (Input.GetKeyDown(KeyCode.Escape)) CloseProfile();
+                    return;
                 }
                 if (Input.GetKeyDown(KeyCode.Escape)) { _phase = Phase.Pause; return; }
                 if (Input.GetKeyDown(KeyCode.Backspace)) Undo();
                 if (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.Return)) Advance();
+                if (Input.GetKeyDown(KeyCode.PageDown) || Input.GetKeyDown(KeyCode.DownArrow)) PageForward();
                 for (int i = 0; i < 9; i++)
                 {
                     if (Input.GetKeyDown(KeyCode.Alpha1 + i) || Input.GetKeyDown(KeyCode.Keypad1 + i))
                     {
-                        if (_textDone && _choices != null && i < _choices.Count) Select(i);
+                        // 数字键只在最后一页生效，避免跳过没读的文字
+                        if (_textDone && IsLastPage && _choices != null && i < _choices.Count) Select(i);
                         break;
                     }
                 }
@@ -585,6 +840,8 @@ namespace Ilves.UI
                 case Phase.Debrief: DrawDebrief(); break;
                 case Phase.Slots: DrawSlots(); break;
             }
+
+            if (_profileOpen) DrawMemberProfile();
 
             GUI.matrix = old;
         }
@@ -682,18 +939,20 @@ namespace Ilves.UI
             Label(new Rect(86, 14, 200, 28), "ILVES", _speaker);
             string mid = (_chapter != null ? _chapter.title + " · " + _chapter.subtitle : "");
             Label(new Rect(240, 16, 760, 28), mid, Centered(_bodySmall));
-            Label(new Rect(1000, 16, 240, 28), "时间 " + _state.ClockText(), Righted(_bodySmall));
+            Label(new Rect(1000, 16, 240, 28), "时间 " + DisplayClockText(), Righted(_bodySmall));
             Fill(new Rect(0, 54, W, 1), OliveDim);
 
-            if (interactive && _history.Count > 0)
+            // 档案弹窗打开时，顶栏的「退回 / 菜单」也要让路（否则会穿透到正文层）
+            bool hudInteractive = interactive && !_profileOpen;
+            if (hudInteractive && _history.Count > 0)
             {
                 if (Button(new Rect(40, 66, 120, 28), "← 退回 (" + _history.Count + ")", false)) Undo();
             }
-            if (interactive)
+            if (hudInteractive)
             {
                 if (Button(new Rect(1090, 66, 132, 30), "菜单 (ESC)", false)) _phase = Phase.Pause;
             }
-            else
+            else if (!interactive)
             {
                 Label(new Rect(1000, 70, 240, 24), "ESC 菜单", Righted(_hint));
             }
@@ -701,32 +960,51 @@ namespace Ilves.UI
             var node = _engine != null ? _engine.Current : null;
             if (node == null) return;
 
+            // Start() 里的初始跳转发生在样式建立之前，这里补一次真正的分页
+            if (_pagesDirty) BuildPages(node);
+
             float bx = 56f, by = 96f, bw = 744f;
             if (!string.IsNullOrEmpty(node.scene)) Label(new Rect(bx, by, bw, 22), node.scene, _scene);
             if (!string.IsNullOrEmpty(node.speaker)) Label(new Rect(bx, by + 26, bw, 34), node.speaker, _speaker);
 
-            string visible = _textDone ? _fullText : _fullText.Substring(0, Mathf.Clamp(Mathf.FloorToInt(_reveal), 0, _fullText.Length));
-            float ty = by + (string.IsNullOrEmpty(node.speaker) ? 26f : 58f);
-            Label(new Rect(bx, ty, bw, 400), visible, _body);
+            // 正文分页：只画当前页；矩形本身就是裁切边界，分页保证页高不溢出
+            string pageText = PageText();
+            string visible = _textDone
+                ? pageText
+                : pageText.Substring(0, Mathf.Clamp(Mathf.FloorToInt(_reveal), 0, pageText.Length));
+            var viewport = BodyViewport(node);
+            GUI.Label(viewport, visible, _body);
 
-            float cy = H - 250f;
-            if (_textDone && _choices != null && _choices.Count > 0)
+            float cy = H - 236f;   // 选项区上移 14px，给正文多一行空间
+            bool canClick = interactive && !_profileOpen;
+            if (!IsLastPage)
             {
-                for (int i = 0; i < _choices.Count && i < 4; i++)
-                    DrawChoice(new Rect(bx, cy + i * 54f, bw, 46f), i, _choices[i], interactive);
+                Label(new Rect(bx, cy + 8, bw, 24), "▾  继续（" + (_page + 1) + " / " + _pages.Count + "）", _hint);
             }
-            else if (_textDone)
-            {
-                Label(new Rect(bx, cy + 8, bw, 24), "▾  空格 / 点击 继续", _hint);
-            }
-            else
+            else if (!_textDone)
             {
                 Label(new Rect(bx, cy + 8, bw, 24), "点击 / 空格 跳过", _hint);
             }
+            else if (_choices != null && _choices.Count > 0)
+            {
+                for (int i = 0; i < _choices.Count && i < 4; i++)
+                    DrawChoice(new Rect(bx, cy + i * 52f, bw, 46f), i, _choices[i], canClick);
+            }
+            else
+            {
+                Label(new Rect(bx, cy + 8, bw, 24), "▾  空格 / 点击 继续", _hint);
+            }
 
-            DrawSidebar();
+            // 滚轮（指针在正文区内）翻页；任意方向都当作向后翻，避免 Event.delta 方向差异
+            if (canClick && Event.current.type == EventType.ScrollWheel && viewport.Contains(Event.current.mousePosition))
+            {
+                PageForward();
+                Event.current.Use();
+            }
 
-            if (interactive && Event.current.type == EventType.MouseDown && Event.current.button == 0 && !_overChoice)
+            DrawSidebar(canClick);
+
+            if (canClick && Event.current.type == EventType.MouseDown && Event.current.button == 0 && !_overChoice)
             {
                 Advance();
                 Event.current.Use();
@@ -750,7 +1028,7 @@ namespace Ilves.UI
             }
         }
 
-        void DrawSidebar()
+        void DrawSidebar(bool interactive)
         {
             float x = 820f, y = 96f, w = 404f;   // 右边界 1224，两侧留白
             float right = x + w - 36f;
@@ -783,16 +1061,61 @@ namespace Ilves.UI
             Fill(new Rect(x + 32, cy, w - 72, 1), OliveDim);
             cy += 12f;
 
+            var mouse = Event.current.mousePosition;
             for (int i = 0; i < GameState.MemberIds.Length; i++)
             {
                 string id = GameState.MemberIds[i];
                 string status = _state.MemberStatus(id);
+                var md = FindMember(id);
+
+                var row = new Rect(x + 16f, cy, w - 32f, rh);
+                bool rowHover = interactive && row.Contains(mouse);
+                if (rowHover) Fill(row, PanelHi);   // 整行 hover 高亮，末尾 i 按钮只是视觉提示，整行可点
+
+                // 姓名
+                string name = GameState.MemberNames[i];
                 var nameSt = new GUIStyle(_side);
                 nameSt.normal.textColor = (id == "vasili") ? Olive : Bone;
-                Label(new Rect(x + 32, cy, 200, rh), GameState.MemberNames[i] + (id == "vasili" ? " (你)" : ""), nameSt);
-                var stSt = new GUIStyle(_side) { alignment = TextAnchor.MiddleRight };
+                float nameW = _side.CalcSize(new GUIContent(name)).x;
+                float nameX = row.x + 16f;
+                Label(new Rect(nameX, cy, nameW + 4f, rh), name, nameSt);
+
+                // 职位：短称紧跟姓名之后，用 CalcSize 量出的真实姓名宽度定位（不写死偏移）
+                string role = md != null ? md.roleShort : "";
+                if (id == "vasili") role = string.IsNullOrEmpty(role) ? "你" : role + " · 你";
+                string roleText = string.IsNullOrEmpty(role) ? "" : "（" + role + "）";
+
+                // 状态区（右对齐）与按钮区从右往左排，姓名+职位区不许越过状态区
+                var stSt = Righted(_side);
                 stSt.normal.textColor = StatusColor(status);
-                Label(new Rect(right - 150, cy, 150, rh), status, stSt);
+                float statusW = _side.CalcSize(new GUIContent(status)).x + 2f;
+                var infoR = new Rect(row.xMax - 26f, cy + 2f, 26f, rh - 4f);
+                float statusX = infoR.x - 10f - statusW;
+
+                float roleX = nameX + nameW;
+                float roleLimit = statusX - 8f;
+                if (!string.IsNullOrEmpty(roleText) && roleLimit > roleX)
+                {
+                    GUI.BeginGroup(new Rect(roleX, cy, roleLimit - roleX, rh));
+                    GUI.Label(new Rect(0f, 0f, _side.CalcSize(new GUIContent(roleText)).x + 6f, rh), roleText, _sideDim);
+                    GUI.EndGroup();
+                }
+
+                Label(new Rect(statusX, cy, statusW, rh), status, stSt);
+
+                // 行末小按钮：方框 + 小字 i，hover 橄榄绿高亮
+                bool infoHover = interactive && infoR.Contains(mouse);
+                Fill(infoR, (infoHover || rowHover) ? new Color(0.18f, 0.19f, 0.13f) : new Color(0.090f, 0.094f, 0.070f));
+                Outline(infoR, (infoHover || rowHover) ? Olive : OliveDim);
+                var infoSt = new GUIStyle(_hint) { fontSize = Mathf.Max(11, _sideFontSize - 5), alignment = TextAnchor.MiddleCenter, wordWrap = false };
+                infoSt.normal.textColor = (infoHover || rowHover) ? new Color(0.95f, 0.95f, 0.90f) : OliveDim;
+                Label(infoR, "i", infoSt);
+
+                if (interactive && rowHover && Event.current.type == EventType.MouseDown && Event.current.button == 0)
+                {
+                    OpenProfile(id);
+                    Event.current.Use();
+                }
                 cy += rh;
             }
 
@@ -817,8 +1140,187 @@ namespace Ilves.UI
             if (status.Contains("伤")) return Danger;
             if (status.Contains("焦虑") || status.Contains("紧张") || status.Contains("专注")) return new Color(0.75f, 0.62f, 0.30f);
             if (status.Contains("失联") || status.Contains("离队") || status.Contains("沉默")) return new Color(0.55f, 0.55f, 0.50f);
-            if (status.Contains("开火") || status.Contains("驾驶") || status.Contains("救治")) return Olive;
+            if (status.Contains("开火") || status.Contains("驾驶") || status.Contains("救治") ||
+                status.Contains("射击") || status.Contains("警戒") || status.Contains("观察") ||
+                status.Contains("布雷") || status.Contains("探路") || status.Contains("引导")) return Olive;
             return Dim;
+        }
+
+        // =====================================================================
+        // 队员档案（members.json）与弹窗
+        // =====================================================================
+        void EnsureMembers()
+        {
+            if (_membersLoaded) return;
+            _membersLoaded = true;
+            try
+            {
+                string json = null;
+                var asset = Resources.Load<TextAsset>("content/members");
+                if (asset != null) json = asset.text;
+                if (string.IsNullOrEmpty(json))
+                {
+                    string path = Path.Combine(Application.streamingAssetsPath, "content", "members.json");
+                    if (File.Exists(path)) json = File.ReadAllText(path, Encoding.UTF8);
+                }
+                if (string.IsNullOrEmpty(json))
+                {
+                    _membersError = "members.json 缺失";
+                    Debug.LogWarning("[ILVES] " + _membersError);
+                    return;
+                }
+                var roster = JsonUtility.FromJson<MemberRoster>(json);
+                if (roster == null || roster.members == null || roster.members.Length == 0)
+                {
+                    _membersError = "members.json 为空";
+                    Debug.LogWarning("[ILVES] " + _membersError);
+                    return;
+                }
+                _members.AddRange(roster.members);
+            }
+            catch (Exception e)
+            {
+                _membersError = e.Message;
+                Debug.LogError("[ILVES] 读取队员档案失败: " + e.Message);
+            }
+        }
+
+        MemberData FindMember(string id)
+        {
+            EnsureMembers();
+            for (int i = 0; i < _members.Count; i++)
+                if (_members[i] != null && _members[i].id == id) return _members[i];
+            return null;
+        }
+
+        void OpenProfile(string id)
+        {
+            _profileId = id;
+            _profileScroll = 0f;
+            _profileOpen = true;
+        }
+
+        void CloseProfile()
+        {
+            _profileOpen = false;
+            _profileId = null;
+            _profileScroll = 0f;
+        }
+
+        string MemberTitle(MemberData m)
+        {
+            if (m == null)
+            {
+                int idx = Array.IndexOf(GameState.MemberIds, _profileId);
+                if (idx >= 0 && idx < GameState.MemberNames.Length) return GameState.MemberNames[idx] + "（档案缺失）";
+                return "队员档案（缺失）";
+            }
+            string t = m.name;
+            if (!string.IsNullOrEmpty(m.callsign)) t += " " + m.callsign;
+            if (!string.IsNullOrEmpty(m.callsignCn)) t += "（" + m.callsignCn + "）";
+            return t;
+        }
+
+        static string WeaponLine(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return "";
+            int i = raw.IndexOf('\u3000');   // 全角空格：拆出「主武器／副武器」标签
+            if (i < 0) return "<color=#D8D9CC>" + raw + "</color>";
+            return "<color=#4E5037>" + raw.Substring(0, i) + "</color>\u3000<color=#D8D9CC>" + raw.Substring(i + 1) + "</color>";
+        }
+
+        string BuildProfileBody(MemberData m)
+        {
+            var sb = new StringBuilder();
+            if (m.weapons != null && m.weapons.Length > 0)
+            {
+                sb.Append("<color=#4E5037>武　器</color>\n");
+                for (int i = 0; i < m.weapons.Length; i++) sb.Append(WeaponLine(m.weapons[i])).Append('\n');
+                sb.Append('\n');
+            }
+            if (m.gear != null && m.gear.Length > 0)
+            {
+                sb.Append("<color=#4E5037>随 身 装 备</color>\n");
+                for (int i = 0; i < m.gear.Length; i++) sb.Append("<color=#8A8C7A>· ").Append(m.gear[i]).Append("</color>\n");
+                sb.Append('\n');
+            }
+            sb.Append("<color=#4E5037>档　案</color>\n");
+            sb.Append("<color=#D8D9CC>").Append(m.bio ?? "").Append("</color>\n\n");
+            sb.Append("<color=#8A8C7A>").Append(m.traits ?? "").Append("</color>\n");
+            return sb.ToString();
+        }
+
+        void DrawMemberProfile()
+        {
+            Fill(new Rect(0f, 0f, W, H), new Color(0f, 0f, 0f, 0.72f));
+            var box = new Rect(W * 0.5f - 400f, H * 0.5f - 300f, 800f, 600f);
+            Fill(box, Panel);
+            Fill(new Rect(box.x, box.y, 2f, box.height), Olive);
+
+            float pad = 32f;
+            float cx = box.x + pad;
+            float cw = box.width - pad * 2f;
+            var m = FindMember(_profileId);
+
+            // 标题：瓦西里 «Хозяин»（当家的）
+            int titleSize = 26 + _fontLevel * 2;   // 26 / 28 / 30，随字号档放大
+            var titleSt = new GUIStyle(_body) { fontSize = titleSize, wordWrap = false };
+            titleSt.normal.textColor = Olive;
+            float y = box.y + 20f;
+            Label(new Rect(cx, y, cw - 30f, titleSize + 14f), MemberTitle(m), titleSt);
+
+            // 三行：岗位 / 军衔 / 年龄·服役
+            y += titleSize + 22f;
+            var metaLabelSt = new GUIStyle(_profileMeta);
+            metaLabelSt.normal.textColor = OliveDim;
+            var metaValueSt = new GUIStyle(_profileMeta);
+            metaValueSt.normal.textColor = Bone;
+            float metaRowH = Mathf.Max(22f, _sideRowH - 2f);
+            string[] metaLabels = { "岗位", "军衔", "年龄·服役" };
+            string[] metaValues =
+            {
+                m != null ? m.role : "—",
+                m != null ? m.rank : "—",
+                m != null ? m.age : "—"
+            };
+            for (int i = 0; i < metaLabels.Length; i++)
+            {
+                Label(new Rect(cx, y, 104f, metaRowH), metaLabels[i], metaLabelSt);
+                Label(new Rect(cx + 110f, y, cw - 110f, metaRowH), metaValues[i], metaValueSt);
+                y += metaRowH;
+            }
+
+            float bodyTop = y + 8f;
+            Fill(new Rect(cx, bodyTop, cw, 1f), OliveDim);
+            bodyTop += 14f;
+            float footerTop = box.yMax - 62f;
+            var vp = new Rect(cx, bodyTop, cw, Mathf.Max(80f, footerTop - bodyTop - 8f));
+
+            string body;
+            if (m != null) body = BuildProfileBody(m);
+            else
+            {
+                body = "<color=#D8D9CC>档案缺失</color>\n\n<color=#8A8C7A>"
+                       + (string.IsNullOrEmpty(_membersError) ? "members.json 里没有这名队员的记录。" : _membersError)
+                       + "</color>";
+            }
+            DrawScrolledText(vp, body, body, _profileBody, ref _profileScroll);
+
+            // 右下关闭
+            var closeR = new Rect(box.xMax - pad - 124f, box.yMax - 52f, 124f, 38f);
+            Label(new Rect(cx, box.yMax - 44f, 420f, 22f), "ESC 关闭  ·  点击面板外关闭", _hint);
+            if (Button(closeR, "关 闭"))
+            {
+                CloseProfile();
+                return;
+            }
+
+            // 点面板外关闭；面板内的点击一律吞掉，避免穿透到正文
+            if (Event.current.type == EventType.MouseDown && Event.current.button == 0)
+            {
+                if (!box.Contains(Event.current.mousePosition)) CloseProfile();
+                Event.current.Use();
+            }
         }
 
         // ---------- 存档档位 ----------
@@ -916,8 +1418,8 @@ namespace Ilves.UI
             Label(new Rect(80, 60, W - 160, 30), "复 盘", _section);
             Label(new Rect(80, 86, W - 160, 64), "任务结束", new GUIStyle(_title) { fontSize = 50, alignment = TextAnchor.UpperLeft });
 
-            float y = 180f;
-            y = Line(80, y, "时间　" + _state.ClockText() + "　（消耗 " + _state.Minutes + " 分钟）");
+            float y = 160f;   // 第二章旗标行变多，整体上移并收一点行距，避免压到下方按钮
+            y = Line(80, y, "时间　" + DisplayClockText() + "　（全战役消耗 " + _state.Minutes + " 分钟）");
             y = Line(80, y, "暴露　" + _state.Exposure + " / 100　（" + _state.ExposureLabel() + "）");
             y = Line(80, y, "情报　" + _state.Intel + " / 6　　信任　" + (_state.Trust >= 0 ? "+" : "") + _state.Trust);
 
@@ -932,6 +1434,14 @@ namespace Ilves.UI
                 y = Line(80, y, "证据　你手里有一段不该存在的命令录音。");
             else if (_state.GetFlag("deleted_recording"))
                 y = Line(80, y, "证据　录音被删了。你选择忘记。");
+
+            // 第二章的旗标（交接文档 §7 遗留）
+            if (_state.GetFlag("deceived")) y = Line(80, y, "欺骗　你喂过他们一个假呼号。");
+            if (_state.GetFlag("trapped")) y = Line(80, y, "阻滞　你在撤离路上留了雷。");
+            if (_state.GetFlag("warned")) y = Line(80, y, "情报　你提醒过沃罗宁：他的电台被渗透了。");
+            else if (_state.GetFlag("watched")) y = Line(80, y, "情报　你看出他的电台有问题，但你什么也没说。");
+            if (_state.GetFlag("secret_kept")) y = Line(80, y, "秘密　旧编号的事，你选择了闭嘴。");
+            else if (_state.GetFlag("reported")) y = Line(80, y, "秘密　旧编号的事，你写进了报告。");
 
             Fill(new Rect(80, y + 8, W - 160, 1), OliveDim);
             y += 30f;
@@ -954,7 +1464,7 @@ namespace Ilves.UI
         float Line(float x, float y, string text, GUIStyle style)
         {
             Label(new Rect(x, y, W - 200, 30), text, style);
-            return y + 34f;
+            return y + 30f;
         }
 
         string Verdict()
@@ -964,9 +1474,15 @@ namespace Ilves.UI
             else if (_state.GetFlag("beacon_located")) score += 1;
             if (_state.GetFlag("sokol_rescued")) score += 3;
             else if (_state.GetFlag("sokol_found")) score += 1;
+            if (_state.GetFlag("barasuk_saved")) score += 2;
+            else if (_state.GetFlag("barasuk_partial")) score += 1;
+            if (_state.GetFlag("warned")) score += 1;
             if (_state.Exposure < 25) score += 2; else if (_state.Exposure > 65) score -= 2;
             score += Mathf.Clamp(_state.Trust, -2, 2);
-            if (score >= 8) return "评价　А —— 你像一只猞猁：看见了，记住了，走了。";
+
+            // 曝光闸门：猞猁准则「潜伏优先」——"看得太清楚"时分数再高也不能给 А
+            if (_state.Exposure >= 70) return "评价　Г —— 你被看得太清楚了。这一夜，林子记住了你们。";
+            if (score >= 8 && _state.Exposure < 55) return "评价　А —— 你像一只猞猁：看见了，记住了，走了。";
             if (score >= 5) return "评价　Б —— 任务完成，代价可控。你能接受这个结果。";
             if (score >= 2) return "评价　В —— 你们回来了，但林子记住了你们。";
             return "评价　Г —— 这一夜，你做了不该做的决定。";
@@ -1021,7 +1537,7 @@ namespace Ilves.UI
             {
                 if (_phase == Phase.Briefing) { StartChapter(); continue; }
                 if (_phase != Phase.Story) break;
-                if (!_textDone) { _reveal = _fullText.Length; _textDone = true; continue; }
+                if (!_textDone) { FinishPage(); continue; }
                 if (_choices != null && _choices.Count > 0) { Select(0); continue; }
                 Advance();
             }
@@ -1073,6 +1589,75 @@ namespace Ilves.UI
             GUI.color = c;
             GUI.DrawTexture(r, Texture2D.whiteTexture);
             GUI.color = old;
+        }
+
+        /// <summary>1px 方框描边（人物栏末尾 i 按钮的框）。</summary>
+        static void Outline(Rect r, Color c)
+        {
+            if (r.width < 2f || r.height < 2f) return;
+            Fill(new Rect(r.x, r.y, r.width, 1f), c);
+            Fill(new Rect(r.x, r.yMax - 1f, r.width, 1f), c);
+            Fill(new Rect(r.x, r.y, 1f, r.height), c);
+            Fill(new Rect(r.xMax - 1f, r.y, 1f, r.height), c);
+        }
+
+        // =====================================================================
+        // 长文滚动（正文与队员档案弹窗共用）
+        // =====================================================================
+        const float ScrollBarW = 8f;
+
+        /// <summary>
+        /// 在 viewport 里绘制可滚动的长文，返回最大滚动量。
+        /// 内容高度按 full 计算（打字机效果只裁 visible），所以边打字边滚不会跳。
+        /// 滚轮只在指针位于视口内时生效；PageUp/PageDown、↑/↓ 同样可滚。
+        /// </summary>
+        static float DrawScrolledText(Rect viewport, string full, string visible, GUIStyle style, ref float scroll, bool handleInput = true)
+        {
+            if (viewport.width < 8f || viewport.height < 8f) { scroll = 0f; return 0f; }
+            if (string.IsNullOrEmpty(full) && string.IsNullOrEmpty(visible)) { scroll = 0f; return 0f; }
+
+            float w = Mathf.Max(8f, viewport.width - ScrollBarW);
+            float contentH = style.CalcHeight(new GUIContent(full ?? ""), w) + 4f;
+            float maxScroll = Mathf.Max(0f, contentH - viewport.height);
+
+            if (handleInput)
+            {
+                var e = Event.current;
+                if (e.type == EventType.ScrollWheel && viewport.Contains(e.mousePosition))
+                {
+                    scroll += e.delta.y * 36f;
+                    e.Use();
+                }
+                else if (e.type == EventType.KeyDown)
+                {
+                    float line = Mathf.Max(18f, style.fontSize * 1.8f);
+                    if (e.keyCode == KeyCode.PageDown) { scroll += viewport.height * 0.9f; e.Use(); }
+                    else if (e.keyCode == KeyCode.PageUp) { scroll -= viewport.height * 0.9f; e.Use(); }
+                    else if (e.keyCode == KeyCode.DownArrow) { scroll += line; e.Use(); }
+                    else if (e.keyCode == KeyCode.UpArrow) { scroll -= line; e.Use(); }
+                }
+            }
+
+            scroll = Mathf.Clamp(scroll, 0f, maxScroll);
+
+            GUI.BeginGroup(viewport);   // IMGUI 裁剪：只画视口内的部分
+            GUI.Label(new Rect(0f, -scroll, w + 4f, contentH + 8f), visible ?? "", style);
+            GUI.EndGroup();
+
+            if (maxScroll > 0.5f) DrawScrollBar(viewport, scroll, maxScroll);
+            return maxScroll;
+        }
+
+        /// <summary>自绘细滚动条（橄榄绿滑块），不用 GUI.skin 默认的浅灰滚动条。</summary>
+        static void DrawScrollBar(Rect viewport, float scroll, float maxScroll)
+        {
+            float sx = viewport.xMax - 2f;
+            Fill(new Rect(sx, viewport.y, 2f, viewport.height), new Color(0.14f, 0.145f, 0.11f));
+            float contentH = viewport.height + maxScroll;
+            float thumbH = Mathf.Min(viewport.height, Mathf.Max(26f, viewport.height * (viewport.height / contentH)));
+            float t = maxScroll > 0f ? Mathf.Clamp01(scroll / maxScroll) : 0f;
+            float thumbY = viewport.y + (viewport.height - thumbH) * t;
+            Fill(new Rect(sx, thumbY, 2f, thumbH), Olive);
         }
     }
 }
