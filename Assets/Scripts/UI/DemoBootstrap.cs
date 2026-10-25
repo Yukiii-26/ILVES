@@ -84,6 +84,7 @@ namespace Ilves.UI
         void Start()
         {
             if (HasArg("-autoplay-demo")) { AutoPlay(); return; }
+            if (HasArg("-savetest")) { SaveTest(); return; }
             if (HasArg("-debrief")) { ApplyDisplay(); FastForwardToDebrief(); return; }
 
             ApplyDisplay();
@@ -762,6 +763,22 @@ namespace Ilves.UI
             }
             Debug.Log("[ILVES-AUTOTEST] PASS");
             Application.Quit(0);
+        }
+
+        /// <summary>无头自检：写盘 → 清空内存 → 读盘，验证真实文件 IO。</summary>
+        void SaveTest()
+        {
+            _resIndex = 0; _fullscreen = false;
+            JumpTo("n09", 1, Phase.Story);
+            _state.AddExposure(9); _state.SetFlag("savetest", true);
+            SaveCurrent(true);
+            int exp = _state.Exposure;
+            _state.Reset();
+            bool ok = LoadSave();
+            bool pass = ok && _state.Exposure == exp && _state.GetFlag("savetest") &&
+                        _engine != null && _engine.Current != null && _engine.Current.id == "n09" && _chapterIndex == 1;
+            Debug.Log("[ILVES-SAVETEST] " + (pass ? "PASS" : "FAIL") + " exposure=" + _state.Exposure + " node=" + (_engine.Current != null ? _engine.Current.id : "null") + " chapter=" + _chapterIndex);
+            Application.Quit(pass ? 0 : 1);
         }
 
         void FastForwardToDebrief()
