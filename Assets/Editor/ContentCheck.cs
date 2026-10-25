@@ -44,6 +44,7 @@ namespace Ilves.EditorTools
                 }
 
                 errors += CheckMembers();
+                errors += CheckTextPrimitives();
                 errors += Playthrough(chapters);
                 errors += SaveRoundTrip();
                 PrintStats(chapters);
@@ -330,6 +331,34 @@ namespace Ilves.EditorTools
         }
 
         // ---------- 存档往返 ----------
+        /// <summary>
+        /// 源码 lint：所有文字必须走 Label() / LabelClipH()（这两个原语会用 CalcHeight 自动加高，
+        /// 所以无论分辨率/字号都不会把文字下沿切掉）。裸 GUI.Label 一律报错。
+        /// 原语自己那三行带 [text-primitive] 标记，是唯一豁免。
+        /// </summary>
+        static int CheckTextPrimitives()
+        {
+            const string uiPath = "Assets/Scripts/UI/DemoBootstrap.cs";
+            if (!File.Exists(uiPath))
+            {
+                Debug.LogWarning("[ILVES-CHECK] 找不到 " + uiPath + "，跳过文字原语检查");
+                return 0;
+            }
+            int bad = 0;
+            var lines = File.ReadAllLines(uiPath, Encoding.UTF8);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                if (line.Contains("GUI.Label(") && !line.Contains("[text-primitive]"))
+                {
+                    Debug.LogError("[ILVES-CHECK] 第 " + (i + 1) + " 行是裸 GUI.Label，必须改用 Label()/LabelClipH()（否则文字会被矩形下沿裁掉）: " + line.Trim());
+                    bad++;
+                }
+            }
+            if (bad == 0) Debug.Log("[ILVES-CHECK] 文字原语 OK（所有文字都走 Label/LabelClipH 自动加高）");
+            return bad;
+        }
+
         static int SaveRoundTrip()
         {
             var s = new GameState();

@@ -53,7 +53,7 @@ namespace Ilves.UI
         int _clockBaseMin;
         int _minuteBase;
 
-        // 正文分页 / 队员档案弹窗
+        // 正文分页（PaginateText + MeasureText）/ 队员档案弹窗（滚轮滚动，按真实行距对齐整行）
         readonly List<string> _pages = new List<string>();
         int _page;
         bool _pagesDirty;
@@ -400,7 +400,14 @@ namespace Ilves.UI
             _fullText = _engine.Current.text ?? "";
             _choices = _engine.VisibleChoices(_state);
             _overChoice = false;
-            BuildPages(_engine.Current);   // 进入节点（含 Undo / 读档）按当前视口重新分页
+            // 先占位，真正的分页在 DrawStory（OnGUI 里）做：真实行距要用 GUIStyle.GetCursorPixelPosition，
+            // 它必须在 GUI 上下文里调用（Update 里按空格推进节点时也能正确分页）。
+            _pages.Clear();
+            _pages.Add(_fullText);
+            _page = 0;
+            _reveal = 0f;
+            _textDone = string.IsNullOrEmpty(_fullText);
+            _pagesDirty = true;
         }
 
         void PushHistory()
@@ -483,9 +490,169 @@ namespace Ilves.UI
         }
 
         /// <summary>
-        /// 按当前正文字体与视口把全文切成「一页一屏」：先按空行分段，再贪心塞段；
-        /// 单段超一页时按字符二分找最长前缀，优先切在句末标点后。每页留 5px 余量，宁可多一页不溢出。
+        /// 统一文字真实高度：行数按 CalcHeight 的行数比例（准），行距用实测真实值（30.4082 @ 22px）。
+        /// CalcHeight 对中文每行会高估约 6px（实测 CalcHeight("国")=36.41 vs 真实行距 30.4082），
+        /// 直接用它会少塞约 1.5 行、裁剪时还会切半行；所有分页 / 裁剪判断都改用 MeasureText。
         /// </summary>
+        static float MeasureText(GUIStyle style, string text, float w)
+        {
+            if (style == null || string.IsNullOrEmpty(text)) return 0f;
+            w = Mathf.Max(8f, w);
+            float one = style.CalcHeight(new GUIContent("国"), w);
+            if (one <= 0f) return 0f;
+            float lines = style.CalcHeight(new GUIContent(text), w) / one;
+            return lines * LineHeight(style, w);
+        }
+
+        /// <summary>
+        /// 通用分页：按空行分段 → 贪心塞段 → 单段超页时按字符二分（优先切在句末标点后）。
+        /// 正文与队员档案弹窗共用；maxH 已是「视口高度 - 余量」。
+        /// </summary>
+        static List<string> PaginateText(string text, GUIStyle style, float w, float maxH)
+        {
+            var pages = new List<string>();
+            if (string.IsNullOrEmpty(text)) { pages.Add(""); return pages; }
+            w = Mathf.Max(20f, w);
+            maxH = Mathf.Max(20f, maxH);
+
+            // 把文字拆成「句子级原子块」：段 → 行 → 句。
+            // 这样页尾只要还能塞进一个完整句子就会塞（不会留大半页空白），
+            // 而且永远不会把一句话劈成两页（阅读节奏）。只有单句本身超过一页时才按字符二分。
+            var blocks = new List<string>();
+            var joins = new List<string>();   // 该块接在上一块后面时用的分隔符
+            string[] paras = text.Split(new[] { "\n\n" }, StringSplitOptions.None);
+            for (int p = 0; p < paras.Length; p++)
+            {
+                string para = paras[p];
+                if (para.Length == 0) continue;
+                bool firstLineOfPara = true;
+
+                string[] lines = para.Split('\n');
+                for (int li = 0; li < lines.Length; li++)
+                {
+                    string line = lines[li];
+                    if (line.Length == 0) continue;
+                    bool firstAtomOfLine = true;
+
+                    var sentences = SplitSentences(line);
+                    for (int si = 0; si < sentences.Count; si++)
+                    {
+                        string sent = sentences[si];
+                        if (sent.Length == 0) continue;
+
+                        string join = firstAtomOfLine
+                            ? (firstLineOfPara ? "\n\n" : "\n")
+                            : "";
+
+                        if (MeasureText(style, sent, w) <= maxH)
+                        {
+                            blocks.Add(sent);
+                            joins.Add(join);
+                        }
+                        else
+                        {
+                            // 极端情况：单句也超一页 → 字符二分（正文没有富文本标签，切字符安全）
+                            int start = 0;
+                            while (start < sent.Length)
+                            {
+                                int take = LongestFittingPrefix(style, sent, start, w, maxH);
+                                if (take <= 0) take = 1;
+                                if (start + take < sent.Length) take = PreferPunctuationBreak(sent, start, take);
+                                if (take <= 0) take = 1;
+                                blocks.Add(sent.Substring(start, take));
+                                joins.Add(start == 0 ? join : "");
+                                start += take;
+                            }
+                        }
+                        firstAtomOfLine = false;
+                    }
+                    firstLineOfPara = false;
+                }
+            }
+
+            if (blocks.Count == 0) { pages.Add(""); return pages; }
+
+            var page = new StringBuilder();
+            for (int i = 0; i < blocks.Count; i++)
+            {
+                string candidate = page.Length == 0 ? blocks[i] : page.ToString() + joins[i] + blocks[i];
+                if (page.Length == 0 || MeasureText(style, candidate, w) <= maxH)
+                {
+                    page.Length = 0;
+                    page.Append(candidate);
+                }
+                else
+                {
+                    pages.Add(page.ToString());
+                    page.Length = 0;
+                    page.Append(blocks[i]);
+                }
+            }
+            if (page.Length > 0) pages.Add(page.ToString());
+            if (pages.Count == 0) pages.Add("");
+            return pages;
+        }
+
+        /// <summary>
+        /// 把一行文字切成句子（句末标点后断，右引号/右括号跟随本句）。
+        /// 用于分页装页：宁可少装半行，也不把一句话劈到两页去。
+        /// </summary>
+        static List<string> SplitSentences(string line)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrEmpty(line)) return list;
+            var sb = new StringBuilder();
+            for (int i = 0; i < line.Length; i++)
+            {
+                sb.Append(line[i]);
+                if (!IsPageBreakPunct(line[i])) continue;
+                // 把紧跟的右引号 / 右括号 / 右书名号一起收进本句
+                while (i + 1 < line.Length)
+                {
+                    char n = line[i + 1];
+                    if (n != '\u300D' && n != '\u300F' && n != '\uFF09' && n != '\u201D' && n != '\u300B') break;
+                    i++;
+                    sb.Append(line[i]);
+                }
+                list.Add(sb.ToString());
+                sb.Length = 0;
+            }
+            if (sb.Length > 0) list.Add(sb.ToString());
+            return list;
+        }
+
+        /// <summary>二分找「刚好放得下的最长前缀」长度（从 start 起，用真实高度判断）。</summary>
+        static int LongestFittingPrefix(GUIStyle style, string s, int start, float w, float maxH)
+        {
+            int lo = 1, hi = s.Length - start, best = 0;
+            while (lo <= hi)
+            {
+                int mid = (lo + hi) / 2;
+                if (MeasureText(style, s.Substring(start, mid), w) <= maxH)
+                { best = mid; lo = mid + 1; }
+                else hi = mid - 1;
+            }
+            return best;
+        }
+
+        static bool IsPageBreakPunct(char c)
+        {
+            return c == '。' || c == '！' || c == '？' || c == '；' || c == '」' || c == '…';
+        }
+
+        /// <summary>二分截断点不一定是句尾：在尽量靠后的句末标点后断开（至少保留半页）。</summary>
+        static int PreferPunctuationBreak(string s, int start, int take)
+        {
+            if (take <= 2) return take;
+            int min = Mathf.Max(1, take / 2);
+            for (int i = start + take - 1; i >= start + min; i--)
+            {
+                if (IsPageBreakPunct(s[i])) return i - start + 1;
+            }
+            return take;
+        }
+
+        /// <summary>正文分页：用 MeasureText 的真实高度切页（一屏比 CalcHeight 多塞约 2 行）。</summary>
         void BuildPages(StoryNode node)
         {
             _pagesDirty = false;
@@ -503,113 +670,27 @@ namespace Ilves.UI
                 return;
             }
 
-            if (string.IsNullOrEmpty(text))
-            {
-                _pages.Add("");
-                _textDone = true;
-                return;
-            }
-
             Rect viewport = BodyViewport(node);
             float w = Mathf.Max(20f, viewport.width);
             float maxH = Mathf.Max(20f, viewport.height - 5f);   // 4–6px 余量
 
-            // 1) 先按空行分段；单段超一页就切成「单页块」，块之间用 newPara 区分是否换段
-            var blocks = new List<string>();
-            var blockNewPara = new List<bool>();
-            string[] paras = text.Split(new[] { "\n\n" }, StringSplitOptions.None);
-            for (int p = 0; p < paras.Length; p++)
-            {
-                string para = paras[p];
-                if (para.Length == 0) continue;
-
-                if (_body.CalcHeight(new GUIContent(para), w) <= maxH)
-                {
-                    blocks.Add(para);
-                    blockNewPara.Add(true);
-                    continue;
-                }
-
-                int start = 0;
-                bool first = true;
-                while (start < para.Length)
-                {
-                    int take = LongestFittingPrefix(para, start, w, maxH);
-                    if (take <= 0) take = 1;
-                    if (start + take < para.Length) take = PreferPunctuationBreak(para, start, take);
-                    if (take <= 0) take = 1;
-                    blocks.Add(para.Substring(start, take));
-                    blockNewPara.Add(first);
-                    first = false;
-                    start += take;
-                }
-            }
-
-            if (blocks.Count == 0)
-            {
-                _pages.Add("");
-                _textDone = true;
-                return;
-            }
-
-            // 2) 贪心把块塞进页
-            var page = new StringBuilder();
-            for (int i = 0; i < blocks.Count; i++)
-            {
-                string candidate = page.Length == 0
-                    ? blocks[i]
-                    : page.ToString() + (blockNewPara[i] ? "\n\n" : "") + blocks[i];
-                if (page.Length == 0 || _body.CalcHeight(new GUIContent(candidate), w) <= maxH)
-                {
-                    page.Length = 0;
-                    page.Append(candidate);
-                }
-                else
-                {
-                    _pages.Add(page.ToString());
-                    page.Length = 0;
-                    page.Append(blocks[i]);
-                }
-            }
-            if (page.Length > 0) _pages.Add(page.ToString());
-            if (_pages.Count == 0) _pages.Add("");
-
+            _pages.AddRange(PaginateText(text, _body, w, maxH));
             _page = 0;
             _reveal = 0f;
             _textDone = string.IsNullOrEmpty(_pages[0]);
+
+            // 分页自检：用 MeasureText 复核，任何一页高于视口才报警（正常永远不应触发）
+            for (int i = 0; i < _pages.Count; i++)
+            {
+                float ph = MeasureText(_body, _pages[i], w);
+                if (ph > viewport.height + 1f)
+                    Debug.LogWarning("[ILVES-PAGES] 页高超视口 node=" + (node != null ? node.id : "?")
+                                     + " page=" + (i + 1) + " h=" + Mathf.RoundToInt(ph)
+                                     + " viewport=" + Mathf.RoundToInt(viewport.height));
+            }
+
             Debug.Log("[ILVES-PAGES] node=" + (node != null ? node.id : "?") + " pages=" + _pages.Count
-                      + " viewport=" + Mathf.RoundToInt(viewport.height) + "px");
-        }
-
-        /// <summary>二分找「刚好放得下的最长前缀」长度（从 start 起）。</summary>
-        int LongestFittingPrefix(string s, int start, float w, float maxH)
-        {
-            int lo = 1, hi = s.Length - start, best = 0;
-            while (lo <= hi)
-            {
-                int mid = (lo + hi) / 2;
-                if (_body.CalcHeight(new GUIContent(s.Substring(start, mid)), w) <= maxH)
-                { best = mid; lo = mid + 1; }
-                else hi = mid - 1;
-            }
-            return best;
-        }
-
-        static bool IsPageBreakPunct(char c)
-        {
-            return c == '。' || c == '！' || c == '？' || c == '；' || c == '」' || c == '…';
-        }
-
-        /// <summary>二分截断点不一定是句尾：在尽量靠后的句末标点后断开（至少保留半页）。</summary>
-        int PreferPunctuationBreak(string s, int start, int take)
-        {
-            if (take <= 2) return take;
-            int min = Mathf.Max(1, take / 2);
-            for (int i = start + take - 1; i >= start + min; i--)
-            {
-                if (IsPageBreakPunct(s[i])) return i - start + 1;
-            }
-            return take;
+                      + " viewport=" + Mathf.RoundToInt(viewport.height) + "px lineH=" + LineHeight(_body, w).ToString("F1"));
         }
 
         void Select(int index)
@@ -778,7 +859,8 @@ namespace Ilves.UI
                     _reveal += Time.unscaledDeltaTime * 42f;
                     if (_reveal >= pageNow.Length) { _reveal = pageNow.Length; _textDone = true; }
                 }
-                // 队员档案弹窗打开时：推进 / 选项 / 暂停全部让路，ESC 只负责关弹窗
+                // 队员档案弹窗打开时：推进 / 选项 / 暂停全部让路，ESC 只负责关弹窗；
+                // 弹窗内滚动交给 DrawScrolledText（滚轮 / PageUp / PageDown / ↑↓）
                 if (_profileOpen)
                 {
                     if (Input.GetKeyDown(KeyCode.Escape)) CloseProfile();
@@ -973,7 +1055,8 @@ namespace Ilves.UI
                 ? pageText
                 : pageText.Substring(0, Mathf.Clamp(Mathf.FloorToInt(_reveal), 0, pageText.Length));
             var viewport = BodyViewport(node);
-            GUI.Label(viewport, visible, _body);
+            // 统一走 Label()：按 CalcHeight 自动加高，绝不把文字下沿切掉（分页负责让正常情况下不溢出）
+            Label(viewport, visible, _body);
 
             float cy = H - 236f;   // 选项区上移 14px，给正文多一行空间
             bool canClick = interactive && !_profileOpen;
@@ -1096,9 +1179,8 @@ namespace Ilves.UI
                 float roleLimit = statusX - 8f;
                 if (!string.IsNullOrEmpty(roleText) && roleLimit > roleX)
                 {
-                    GUI.BeginGroup(new Rect(roleX, cy, roleLimit - roleX, rh));
-                    GUI.Label(new Rect(0f, 0f, _side.CalcSize(new GUIContent(roleText)).x + 6f, rh), roleText, _sideDim);
-                    GUI.EndGroup();
+                    // 只在横向裁（不能压到状态列），纵向按 CalcHeight 自动加高——三档字号都不许切字
+                    LabelClipH(new Rect(roleX, cy, roleLimit - roleX, rh), roleText, _sideDim);
                 }
 
                 Label(new Rect(statusX, cy, statusW, rh), status, stSt);
@@ -1196,7 +1278,7 @@ namespace Ilves.UI
         void OpenProfile(string id)
         {
             _profileId = id;
-            _profileScroll = 0f;
+            _profileScroll = 0f;   // 打开时从顶部开始
             _profileOpen = true;
         }
 
@@ -1304,18 +1386,21 @@ namespace Ilves.UI
                        + (string.IsNullOrEmpty(_membersError) ? "members.json 里没有这名队员的记录。" : _membersError)
                        + "</color>";
             }
+            // 弹窗正文恢复滚轮滚动：用真实行距（LineHeight）对齐整行，滚到任何位置都不会切半行
             DrawScrolledText(vp, body, body, _profileBody, ref _profileScroll);
 
-            // 右下关闭
+            // 右下关闭；左侧保留 ESC / 点面板外提示，关闭按钮左边提示滚动方式（不显示页码）
             var closeR = new Rect(box.xMax - pad - 124f, box.yMax - 52f, 124f, 38f);
-            Label(new Rect(cx, box.yMax - 44f, 420f, 22f), "ESC 关闭  ·  点击面板外关闭", _hint);
+            Label(new Rect(cx, box.yMax - 44f, 258f, 22f), "ESC 关闭  ·  点击面板外关闭", _hint);
+            Label(new Rect(cx + 264f, box.yMax - 44f, closeR.x - 12f - (cx + 264f), 22f),
+                  "滚轮 / PageUp / PageDown 滚动", Righted(_hint));
             if (Button(closeR, "关 闭"))
             {
                 CloseProfile();
                 return;
             }
 
-            // 点面板外关闭；面板内的点击一律吞掉，避免穿透到正文
+            // 点面板外关闭；面板内的点击一律吞掉，避免穿透到正文（滚轮/按键由 DrawScrolledText 处理）
             if (Event.current.type == EventType.MouseDown && Event.current.button == 0)
             {
                 if (!box.Contains(Event.current.mousePosition)) CloseProfile();
@@ -1566,6 +1651,18 @@ namespace Ilves.UI
             return false;
         }
 
+        // =====================================================================
+        // 文字绘制唯一入口（项目铁律）
+        //
+        // 所有文字都必须走 Label() / LabelClipH()：先用 GUIStyle.CalcHeight() 量出这段文字
+        // 实际需要的高度，矩形不够就自动加高（居中样式上下对称加高），再画。
+        // 这样无论分辨率、字号档怎么变，文字都不会被矩形下沿切掉（历史 bug 代号"遁地"）。
+        //
+        // 唯一允许直接 GUI.Label 的地方是本文件里带 [text-primitive] 标记的三个原语
+        // （Label / LabelClipH / DrawScrolledText 的滚动裁剪层），
+        // ContentCheck 会用源码 lint 卡住裸 GUI.Label —— 新增界面时不要绕开。
+        // 分页高度判断不用 CalcHeight，一律走 MeasureText()（行数比例 × 实测真实行距）。
+        // =====================================================================
         /// <summary>绘制文本前按实际行高扩展矩形，避免字号变大时文字底部被裁（"遁地"）。</summary>
         static void Label(Rect r, string text, GUIStyle style)
         {
@@ -1580,7 +1677,21 @@ namespace Ilves.UI
                     ? new Rect(r.x, r.y - (need - r.height) * 0.5f, r.width, need)
                     : new Rect(r.x, r.y, r.width, need);
             }
-            GUI.Label(r, text, style);
+            GUI.Label(r, text, style);   // [text-primitive]
+        }
+
+        /// <summary>
+        /// 需要「只在横向裁切」的文字（例如人物栏的职位，不许压到右边的状态列）：
+        /// 宽度按给定值裁，高度一律按 CalcHeight 自动加高，所以纵向永远不会切字。
+        /// </summary>
+        static void LabelClipH(Rect r, string text, GUIStyle style)
+        {
+            if (string.IsNullOrEmpty(text) || r.width <= 1f) return;
+            float need = style.CalcHeight(new GUIContent(text), Mathf.Max(1f, r.width)) + 4f;
+            float h = Mathf.Max(r.height, need);
+            GUI.BeginGroup(new Rect(r.x, r.y, r.width, h));   // 只裁横向
+            GUI.Label(new Rect(0f, 0f, style.CalcSize(new GUIContent(text)).x + 8f, h), text, style);   // [text-primitive]
+            GUI.EndGroup();
         }
 
         static void Fill(Rect r, Color c)
@@ -1602,61 +1713,113 @@ namespace Ilves.UI
         }
 
         // =====================================================================
-        // 长文滚动（正文与队员档案弹窗共用）
+        // 真实行距（MeasureText 用）
+        // =====================================================================
+        static GUIStyle _lineHeightStyle;
+        static float _lineHeightCache;
+
+        /// <summary>
+        /// 从**真实排版**里量行距（不用 CalcHeight 猜）：喂一段三行文本，取第 1 行与第 3 行
+        /// 光标顶点的 y 差再除以 2。CalcHeight 对中文每行会高估约 6px（实测 22px 字号 36.41 vs 30.4082），
+        /// 分页/裁剪按它算就会每页少塞 1.5 行、甚至切半行。结果按 style 实例缓存，样式重建（换字号档）时重测。
+        /// </summary>
+        static float LineHeight(GUIStyle style, float w)
+        {
+            if (style == null) return 0f;
+            if (ReferenceEquals(style, _lineHeightStyle) && _lineHeightCache > 0f) return _lineHeightCache;
+
+            var probe = new GUIContent("国\n国\n国");
+            var big = new Rect(0f, 0f, Mathf.Max(8f, w), 10000f);
+            float y0 = style.GetCursorPixelPosition(big, probe, 0).y;
+            float y2 = style.GetCursorPixelPosition(big, probe, 4).y;   // 第三行首字
+            float lh = (y2 - y0) * 0.5f;
+            float calc = style.CalcHeight(new GUIContent("国"), Mathf.Max(8f, w));
+            // 每个样式实例只量一次（缓存未命中时打印，便于核对真实行距）
+            Debug.Log("[ILVES-LINE] lineH=" + lh + " calcHeight=" + calc
+                      + " ratio=" + (calc > 0f ? lh / calc : 0f) + " fontSize=" + style.fontSize);
+            if (lh < 8f || lh > 400f) lh = Mathf.Max(8f, calc);
+            _lineHeightStyle = style;
+            _lineHeightCache = lh;
+            return lh;
+        }
+
+        // =====================================================================
+        // 滚轮滚动（只给队员档案弹窗用）：按真实行距对齐整行，绝不切半行
         // =====================================================================
         const float ScrollBarW = 8f;
 
+        /// <summary>返回真实行距，同时给出首行相对文本框顶部的偏移（拿不到偏移就按 0）。</summary>
+        static float LineGrid(GUIStyle style, float w, out float topOffset)
+        {
+            var probe = new GUIContent("国\n国\n国");
+            var big = new Rect(0f, 0f, Mathf.Max(8f, w), 10000f);
+            topOffset = style.GetCursorPixelPosition(big, probe, 0).y;
+            if (topOffset < 0f || topOffset > 200f) topOffset = 0f;
+            return LineHeight(style, w);
+        }
+
         /// <summary>
         /// 在 viewport 里绘制可滚动的长文，返回最大滚动量。
-        /// 内容高度按 full 计算（打字机效果只裁 visible），所以边打字边滚不会跳。
-        /// 滚轮只在指针位于视口内时生效；PageUp/PageDown、↑/↓ 同样可滚。
+        /// 两条硬约束，保证滚到任何位置都不切半行：
+        ///   1) 可视高度 innerH = 首行偏移 + floor((视口高 - 首行偏移) / 真实行距) × 真实行距；
+        ///   2) 滚动量吸附到真实行距的整数倍。
+        /// 行距来自 LineHeight()（GetCursorPixelPosition 实测），不再用 CalcHeight 猜。
         /// </summary>
         static float DrawScrolledText(Rect viewport, string full, string visible, GUIStyle style, ref float scroll, bool handleInput = true)
         {
-            if (viewport.width < 8f || viewport.height < 8f) { scroll = 0f; return 0f; }
+            if (style == null || viewport.width < 8f || viewport.height < 8f) { scroll = 0f; return 0f; }
             if (string.IsNullOrEmpty(full) && string.IsNullOrEmpty(visible)) { scroll = 0f; return 0f; }
 
             float w = Mathf.Max(8f, viewport.width - ScrollBarW);
-            float contentH = style.CalcHeight(new GUIContent(full ?? ""), w) + 4f;
-            float maxScroll = Mathf.Max(0f, contentH - viewport.height);
+            float topOffset;
+            float lineH = LineGrid(style, w, out topOffset);
+            if (lineH < 1f) { scroll = 0f; return 0f; }
+
+            float usable = Mathf.Max(lineH, viewport.height - topOffset);
+            float innerH = topOffset + Mathf.Max(lineH, Mathf.Floor(usable / lineH) * lineH);
+            float lineArea = Mathf.Max(0f, innerH - topOffset);                        // 能显示的整行总高
+            float contentH = Mathf.Max(0f, Mathf.Round(MeasureText(style, full ?? "", w) / lineH) * lineH);
+            float maxScroll = Mathf.Max(0f, contentH - lineArea);
 
             if (handleInput)
             {
                 var e = Event.current;
                 if (e.type == EventType.ScrollWheel && viewport.Contains(e.mousePosition))
                 {
-                    scroll += e.delta.y * 36f;
-                    e.Use();
+                    // Unity 里滚轮向下 = delta.y 为负；向下滚应当看后面的内容 → scroll 增大
+                    if (Mathf.Abs(e.delta.y) > 0.001f) { scroll -= Mathf.Sign(e.delta.y) * lineH * 1.5f; e.Use(); }
                 }
                 else if (e.type == EventType.KeyDown)
                 {
-                    float line = Mathf.Max(18f, style.fontSize * 1.8f);
-                    if (e.keyCode == KeyCode.PageDown) { scroll += viewport.height * 0.9f; e.Use(); }
-                    else if (e.keyCode == KeyCode.PageUp) { scroll -= viewport.height * 0.9f; e.Use(); }
-                    else if (e.keyCode == KeyCode.DownArrow) { scroll += line; e.Use(); }
-                    else if (e.keyCode == KeyCode.UpArrow) { scroll -= line; e.Use(); }
+                    if (e.keyCode == KeyCode.PageDown) { scroll += lineArea; e.Use(); }
+                    else if (e.keyCode == KeyCode.PageUp) { scroll -= lineArea; e.Use(); }
+                    else if (e.keyCode == KeyCode.DownArrow) { scroll += lineH; e.Use(); }
+                    else if (e.keyCode == KeyCode.UpArrow) { scroll -= lineH; e.Use(); }
                 }
             }
 
             scroll = Mathf.Clamp(scroll, 0f, maxScroll);
+            // 吸附到真实行网格：只要 scroll 是 lineH 的整数倍、innerH 也落在网格上，
+            // 视口底部就永远是一条完整的行边界，最后一行不会被切半截
+            scroll = Mathf.Clamp(Mathf.Round(scroll / lineH) * lineH, 0f, maxScroll);
 
-            GUI.BeginGroup(viewport);   // IMGUI 裁剪：只画视口内的部分
-            GUI.Label(new Rect(0f, -scroll, w + 4f, contentH + 8f), visible ?? "", style);
+            GUI.BeginGroup(new Rect(viewport.x, viewport.y, viewport.width - ScrollBarW, innerH));   // 裁剪层：只露整行
+            GUI.Label(new Rect(0f, -scroll, w, contentH + topOffset + lineH), visible ?? "", style);   // [text-primitive]
             GUI.EndGroup();
 
-            if (maxScroll > 0.5f) DrawScrollBar(viewport, scroll, maxScroll);
+            if (maxScroll > 0.5f) DrawScrollBar(viewport, scroll, maxScroll, innerH);
             return maxScroll;
         }
 
         /// <summary>自绘细滚动条（橄榄绿滑块），不用 GUI.skin 默认的浅灰滚动条。</summary>
-        static void DrawScrollBar(Rect viewport, float scroll, float maxScroll)
+        static void DrawScrollBar(Rect viewport, float scroll, float maxScroll, float innerH)
         {
             float sx = viewport.xMax - 2f;
-            Fill(new Rect(sx, viewport.y, 2f, viewport.height), new Color(0.14f, 0.145f, 0.11f));
-            float contentH = viewport.height + maxScroll;
-            float thumbH = Mathf.Min(viewport.height, Mathf.Max(26f, viewport.height * (viewport.height / contentH)));
+            Fill(new Rect(sx, viewport.y, 2f, innerH), new Color(0.14f, 0.145f, 0.11f));
+            float content = innerH + maxScroll;
+            float thumbH = Mathf.Min(innerH, Mathf.Max(26f, innerH * (innerH / content)));
             float t = maxScroll > 0f ? Mathf.Clamp01(scroll / maxScroll) : 0f;
-            float thumbY = viewport.y + (viewport.height - thumbH) * t;
+            float thumbY = viewport.y + (innerH - thumbH) * t;
             Fill(new Rect(sx, thumbY, 2f, thumbH), Olive);
         }
     }
