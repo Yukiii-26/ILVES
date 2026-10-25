@@ -70,6 +70,7 @@ namespace Ilves.UI
         bool _hasSave;
         SlotMode _slotMode = SlotMode.Load;
         bool _noSavePrefs;
+        bool _freezeTyping;   // QA：冻结打字机，便于检查提示行等静态文字
         int _fontLevel = 1;                 // 0=小 1=标准 2=大
         static readonly int[] SideSizes = { 16, 18, 21 };
         static readonly int[] RowHeights = { 24, 27, 32 };
@@ -101,6 +102,7 @@ namespace Ilves.UI
 
         void Start()
         {
+            if (HasArg("-typing")) { _freezeTyping = true; _fontLevel = 2; }
             if (HasArg("-bigfont")) _fontLevel = 2;
             string fontArg = ArgValue("-font");
             if (!string.IsNullOrEmpty(fontArg)) { int fv; if (int.TryParse(fontArg, out fv)) _fontLevel = Mathf.Clamp(fv, 0, 2); }
@@ -504,7 +506,7 @@ namespace Ilves.UI
 
             if (_phase == Phase.Story)
             {
-                if (!_textDone)
+                if (!_textDone && !_freezeTyping)
                 {
                     _reveal += Time.unscaledDeltaTime * 42f;
                     if (_reveal >= _fullText.Length) { _reveal = _fullText.Length; _textDone = true; }
@@ -1009,9 +1011,21 @@ namespace Ilves.UI
             return false;
         }
 
+        /// <summary>绘制文本前按实际行高扩展矩形，避免字号变大时文字底部被裁（"遁地"）。</summary>
         static void Label(Rect r, string text, GUIStyle style)
         {
-            if (!string.IsNullOrEmpty(text)) GUI.Label(r, text, style);
+            if (string.IsNullOrEmpty(text)) return;
+            float need = style.CalcHeight(new GUIContent(text), Mathf.Max(1f, r.width)) + 4f;
+            if (need > r.height)
+            {
+                bool centered = style.alignment == TextAnchor.MiddleCenter ||
+                                style.alignment == TextAnchor.MiddleLeft ||
+                                style.alignment == TextAnchor.MiddleRight;
+                r = centered
+                    ? new Rect(r.x, r.y - (need - r.height) * 0.5f, r.width, need)
+                    : new Rect(r.x, r.y, r.width, need);
+            }
+            GUI.Label(r, text, style);
         }
 
         static void Fill(Rect r, Color c)
