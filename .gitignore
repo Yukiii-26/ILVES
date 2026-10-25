@@ -1,0 +1,74 @@
+# ============================================================
+# ILVES — Unity 工程 .gitignore（Unity 6.3 LTS / 6000.3.27f1）
+# 原则：只提交源资产与工程配置；凡编辑器可再生成的，一律忽略。
+# ============================================================
+
+# ---------- Unity 生成目录（体积大、可再生成） ----------
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# ---------- 自动生成的 IDE / 编译产物 ----------
+ExportedObj/
+.consulo/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# ---------- 打包/导出产物 ----------
+*.apk
+*.aab
+*.unitypackage
+*.app
+*.exe
+*.pck
+crashlytics-build.properties
+
+# ---------- 本机临时文件 / 侦察日志 ----------
+sysinfo.txt
+*.stackdump
+*.log
+ILVES-logs/
+
+# ---------- IDE / 编辑器 ----------
+.vs/
+.idea/
+.vscode/
+*.swp
+*~
+.vsconfig
+
+# ---------- 操作系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# 注意：
+#  1) 不要忽略 *.meta —— Unity 依赖它们维持资源 GUID。
+#  2) 不要忽略 ProjectSettings/ 与 Packages/manifest.json —— 团队必须一致。
+#  3) 大二进制资产走 .gitattributes 里的 Git LFS 规则，不在这里忽略。
+# ============================================================
+
+# 含本机个人信息，禁止入库
+docs/环境清单.md

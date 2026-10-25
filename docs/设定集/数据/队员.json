@@ -1,0 +1,419 @@
+{
+  "schema": "ilves-squad-members/v1",
+  "source": "猞猁小队基础设定集/猞猁小队设定集.docx",
+  "updated": "2026-10-25",
+  "squad": {
+    "ru_name": "ООСпН «Илвес»",
+    "ru_expansion": "Отдельная группа специального назначения «Илвес»",
+    "zh_name": "独立特种用途小组「猞猁」",
+    "zh_short": "猞猁小队",
+    "en_name": "Ilves",
+    "size": 9,
+    "area": "卡累利阿方向边境林区（泰加林/无路沼泽/寒带密林）",
+    "creed": [
+      "潜伏优先",
+      "一击脱离",
+      "不追不恋",
+      "交火是失败后的补救"
+    ],
+    "colors": {
+      "bg": "#050504",
+      "primary": "#767954",
+      "shade": "#4E5037"
+    },
+    "emblem_elements": [
+      "猞猁侧脸",
+      "松枝与两颗松果",
+      "三道划破内圈的抓痕"
+    ]
+  },
+  "members": [
+    {
+      "id": "vasili",
+      "order": 1,
+      "zh": "瓦西里",
+      "ru": "Василий",
+      "callsign_ru": "Хозяин",
+      "callsign_zh": "当家的",
+      "callsign_en": "The Owner",
+      "role": "squad_leader",
+      "role_zh": "组长",
+      "rank_ru": "сержант",
+      "rank_zh": "中士",
+      "age": 34,
+      "service_years": 12,
+      "specops_years": 8,
+      "primary": "АК-105 (短管突击步枪)",
+      "secondary": "ПЯ «Грач» 9×19",
+      "skills": [
+        "路线规划",
+        "任务取舍",
+        "与上级周旋",
+        "信息不全时决策"
+      ],
+      "weaknesses": [
+        "过度保守"
+      ],
+      "relations": {
+        "压得住": [
+          "基里尔",
+          "帕维尔"
+        ],
+        "压不住": [
+          "伊戈尔"
+        ],
+        "分歧": [
+          "后方指挥"
+        ]
+      },
+      "conflict": "完成任务 vs 带人回去",
+      "gameplay_verb": [
+        "决策",
+        "授权",
+        "放弃/继续"
+      ]
+    },
+    {
+      "id": "igor",
+      "order": 2,
+      "zh": "伊戈尔",
+      "ru": "Игорь",
+      "callsign_ru": "Первый",
+      "callsign_zh": "第一个",
+      "callsign_en": "Number One",
+      "role": "deputy_point_fire_support",
+      "role_zh": "副队长／尖兵／火力引导",
+      "rank_ru": "младший сержант",
+      "rank_zh": "下士",
+      "age": 29,
+      "service_years": 8,
+      "specops_years": 4,
+      "primary": "АК-105 (1-4× 全息)",
+      "secondary": "ПЯ «Грач» 9×19",
+      "skills": [
+        "地形记忆",
+        "无人机侦察",
+        "火力引导"
+      ],
+      "weaknesses": [
+        "好胜冒进",
+        "树冠下无人机失联即判断粗糙"
+      ],
+      "relations": {
+        "竞争": [
+          "谢苗"
+        ],
+        "上级": [
+          "瓦西里"
+        ]
+      },
+      "conflict": "他带来一个“可以打”的目标，但瓦西里认为是陷阱",
+      "gameplay_verb": [
+        "前出",
+        "引导打击",
+        "无人机侦察"
+      ]
+    },
+    {
+      "id": "roman",
+      "order": 3,
+      "zh": "罗曼",
+      "ru": "Роман",
+      "callsign_ru": "Тихий",
+      "callsign_zh": "安静的人",
+      "callsign_en": "The Quiet",
+      "role": "sniper",
+      "role_zh": "狙击手",
+      "rank_ru": "прапорщик",
+      "rank_zh": "准尉",
+      "age": 38,
+      "service_years": 16,
+      "specops_years": 16,
+      "primary": "СВ-98 (7.62×54R)",
+      "secondary": "ПЯ «Грач» 9×19",
+      "skills": [
+        "独立潜伏三天",
+        "一枪一评估",
+        "判断目标价值"
+      ],
+      "weaknesses": [
+        "社交孤立",
+        "潜伏过久脱离现实"
+      ],
+      "relations": {
+        "稳定工作对话": [
+          "阿尔乔姆"
+        ],
+        "不耐烦": [
+          "基里尔"
+        ]
+      },
+      "conflict": "高价值目标身边有平民/少年，开不开枪",
+      "gameplay_verb": [
+        "占领阵地",
+        "狙杀",
+        "评估目标"
+      ]
+    },
+    {
+      "id": "artem",
+      "order": 4,
+      "zh": "阿尔乔姆",
+      "ru": "Артём",
+      "callsign_ru": "Док",
+      "callsign_zh": "医生",
+      "callsign_en": "Doc",
+      "role": "spotter_cls",
+      "role_zh": "观察手／战斗救生员",
+      "rank_ru": "сержант",
+      "rank_zh": "中士",
+      "age": 31,
+      "service_years": 9,
+      "specops_years": 9,
+      "primary": "АК-74М",
+      "secondary": "ПЯ «Грач» 9×19",
+      "skills": [
+        "测风测距",
+        "观察警戒",
+        "针减压",
+        "止血带",
+        "胸腔封闭",
+        "静脉通路"
+      ],
+      "weaknesses": [
+        "见伤就上",
+        "PTSD 隐忧"
+      ],
+      "relations": {
+        "锚": [
+          "罗曼"
+        ],
+        "耐心": [
+          "德米特里"
+        ],
+        "医疗权威": [
+          "基里尔"
+        ]
+      },
+      "conflict": "两个伤员只能先救一个",
+      "gameplay_verb": [
+        "观察",
+        "救治",
+        "稳定情绪"
+      ]
+    },
+    {
+      "id": "semen",
+      "order": 5,
+      "zh": "谢苗",
+      "ru": "Семён",
+      "callsign_ru": "Тишина",
+      "callsign_zh": "静默",
+      "callsign_en": "Silence",
+      "role": "comms_ew",
+      "role_zh": "通信／电子战",
+      "rank_ru": "младший сержант",
+      "rank_zh": "下士",
+      "age": 27,
+      "service_years": 6,
+      "specops_years": 6,
+      "primary": "АК-74М",
+      "secondary": "ПЯ «Грач» 9×19",
+      "skills": [
+        "跳频",
+        "短报",
+        "信号卫生",
+        "反制 FPV",
+        "树冠下维持链路"
+      ],
+      "weaknesses": [
+        "多疑，过度静默"
+      ],
+      "relations": {
+        "竞争但默契": [
+          "伊戈尔"
+        ]
+      },
+      "conflict": "怀疑己方频道被渗透而坚持静默，后方误判",
+      "gameplay_verb": [
+        "静默",
+        "开台",
+        "干扰",
+        "反无人机"
+      ]
+    },
+    {
+      "id": "kirill",
+      "order": 6,
+      "zh": "基里尔",
+      "ru": "Кирилл",
+      "callsign_ru": "Кулак",
+      "callsign_zh": "拳头",
+      "callsign_en": "Fist",
+      "role": "assault",
+      "role_zh": "突击手",
+      "rank_ru": "ефрейтор",
+      "rank_zh": "上等兵",
+      "age": 26,
+      "service_years": 5,
+      "specops_years": 5,
+      "primary": "АК-105 + ГП-25",
+      "secondary": "ПЯ «Грач»；АПБ（私货）",
+      "skills": [
+        "破门",
+        "近距清房",
+        "活捉",
+        "断后压制"
+      ],
+      "weaknesses": [
+        "冲动，真想打"
+      ],
+      "relations": {
+        "同为想打的人": [
+          "帕维尔"
+        ],
+        "服软的医疗权威": [
+          "阿尔乔姆"
+        ]
+      },
+      "conflict": "可以打但会暴露的目标，打不打",
+      "gameplay_verb": [
+        "破门",
+        "突入",
+        "抓捕",
+        "断后"
+      ]
+    },
+    {
+      "id": "dmitri",
+      "order": 7,
+      "zh": "德米特里",
+      "ru": "Дмитрий",
+      "callsign_ru": "Крот",
+      "callsign_zh": "鼹鼠",
+      "callsign_en": "Mole",
+      "role": "sapper",
+      "role_zh": "工兵",
+      "rank_ru": "рядовой",
+      "rank_zh": "列兵",
+      "age": 23,
+      "service_years": 2,
+      "specops_years": 0,
+      "primary": "АК-74М",
+      "secondary": "ПЯ «Грач» 9×19",
+      "skills": [
+        "布雷",
+        "排雷",
+        "破障",
+        "路线阻滞",
+        "雷区必绘图"
+      ],
+      "weaknesses": [
+        "过度谨慎",
+        "新人代沟"
+      ],
+      "relations": {
+        "互相依靠": [
+          "帕维尔"
+        ],
+        "耐心": [
+          "阿尔乔姆"
+        ]
+      },
+      "conflict": "布雷阻滞追兵，却被自己人踩中",
+      "gameplay_verb": [
+        "布雷",
+        "排雷",
+        "爆破"
+      ]
+    },
+    {
+      "id": "nikolai",
+      "order": 8,
+      "zh": "尼古拉",
+      "ru": "Николай",
+      "callsign_ru": "Возчик",
+      "callsign_zh": "赶车的",
+      "callsign_en": "Wagoner",
+      "role": "scout_driver",
+      "role_zh": "侦察／驾驶员",
+      "rank_ru": "младший сержант",
+      "rank_zh": "下士",
+      "age": 30,
+      "service_years": 7,
+      "specops_years": 7,
+      "primary": "АК-105",
+      "secondary": "ПЯ «Грач» 9×19",
+      "skills": [
+        "雪地/沼泽机动",
+        "车辆维修",
+        "记忆路径"
+      ],
+      "weaknesses": [
+        "离了车就迷路感"
+      ],
+      "relations": {
+        "路线判断冲突": [
+          "伊戈尔"
+        ]
+      },
+      "conflict": "车只剩一台，带伤员还是带装备",
+      "gameplay_verb": [
+        "驾驶",
+        "运输",
+        "探路"
+      ]
+    },
+    {
+      "id": "pavel",
+      "order": 9,
+      "zh": "帕维尔",
+      "ru": "Павел",
+      "callsign_ru": "Ствол",
+      "callsign_zh": "枪管",
+      "callsign_en": "Barrel",
+      "role": "machine_gunner",
+      "role_zh": "机枪手",
+      "rank_ru": "ефрейтор",
+      "rank_zh": "上等兵",
+      "age": 28,
+      "service_years": 6,
+      "specops_years": 6,
+      "primary": "РПК-16（试验型，5.45×39）",
+      "secondary": "ПЯ «Грач» 9×19",
+      "skills": [
+        "短点射压制",
+        "掩护撤离",
+        "控制弹药"
+      ],
+      "weaknesses": [
+        "护枪如命，怕卡壳"
+      ],
+      "relations": {
+        "互相依靠": [
+          "德米特里"
+        ],
+        "需要压着": [
+          "基里尔"
+        ]
+      },
+      "conflict": "试验枪第一次卡壳，恰在掩护撤离时",
+      "gameplay_verb": [
+        "压制",
+        "掩护撤离"
+      ]
+    }
+  ],
+  "open_questions": [
+    "时代与敌我",
+    "视角与操作",
+    "节奏",
+    "规模",
+    "美术风格",
+    "平台",
+    "语言",
+    "正式游戏名",
+    "真实性问题",
+    "仓库结构"
+  ]
+}
