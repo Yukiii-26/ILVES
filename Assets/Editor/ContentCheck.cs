@@ -11,7 +11,7 @@ namespace Ilves.EditorTools
     /// <summary>无头内容校验：解析所有章节、检查跳转与可达性，并跑一遍完整流程。</summary>
     public static class ContentCheck
     {
-        static readonly string[] Files = { "prologue.json", "chapter01.json" };
+        static readonly string[] Files = { "prologue.json", "chapter01.json", "chapter02.json" };
 
         public static void Run()
         {
@@ -20,6 +20,7 @@ namespace Ilves.EditorTools
             {
                 foreach (var file in Files) errors += CheckChapter(file);
                 errors += Playthrough();
+                errors += SaveRoundTrip();
             }
             catch (Exception e)
             {
@@ -99,6 +100,26 @@ namespace Ilves.EditorTools
             }
             Debug.Log("[ILVES-CHECK] " + file + " OK nodes=" + ch.nodes.Length + " reachable=" + seen.Count + " ends=" + ends);
             return errors;
+        }
+
+        static int SaveRoundTrip()
+        {
+            var s = new GameState();
+            s.AddExposure(17); s.AddTime(33); s.AddIntel(2); s.AddTrust(-1);
+            s.SetFlag("beacon_down", true);
+            s.SetMemberStatus("igor", "受伤");
+            s.RecordChoice("谨慎");
+            var data = SaveCodec.Capture(1, "n05", "第一章", s);
+            var json = JsonUtility.ToJson(data);
+            var back = JsonUtility.FromJson<SaveData>(json);
+            var s2 = new GameState();
+            SaveCodec.Apply(back, s2);
+            bool ok = s2.Exposure == s.Exposure && s2.Minutes == s.Minutes && s2.Intel == s.Intel &&
+                      s2.Trust == s.Trust && s2.GetFlag("beacon_down") && s2.MemberStatus("igor") == "受伤" &&
+                      s2.Notes.Count == s.Notes.Count && back.nodeId == "n05" && back.chapterIndex == 1;
+            if (!ok) Debug.LogError("[ILVES-CHECK] 存档往返失败");
+            else Debug.Log("[ILVES-CHECK] save round-trip OK");
+            return ok ? 0 : 1;
         }
 
         static int Playthrough()

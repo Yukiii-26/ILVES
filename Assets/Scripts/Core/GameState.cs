@@ -8,14 +8,13 @@ namespace Ilves.Core
         public const int StartHour = 2;
         public const int StartMinute = 40;
 
-        public int Exposure;          // 0..100
-        public int Minutes;           // 已消耗分钟
-        public int Intel;             // 0..6
-        public int Trust;             // -5..5
+        public int Exposure;
+        public int Minutes;
+        public int Intel;
+        public int Trust;
         public readonly Dictionary<string, bool> Flags = new Dictionary<string, bool>();
         public readonly Dictionary<string, string> Members = new Dictionary<string, string>();
-        public readonly List<string> Notes = new List<string>();   // 选择倾向记录
-        public readonly List<string> Log = new List<string>();     // 决策流水（复盘用）
+        public readonly List<string> Notes = new List<string>();
 
         public static readonly string[] MemberIds =
         {
@@ -32,9 +31,19 @@ namespace Ilves.Core
         public void Reset()
         {
             Exposure = 0; Minutes = 0; Intel = 0; Trust = 0;
-            Flags.Clear(); Notes.Clear(); Log.Clear();
+            Flags.Clear(); Notes.Clear();
             Members.Clear();
             for (int i = 0; i < MemberIds.Length; i++) Members[MemberIds[i]] = "待命";
+        }
+
+        public GameState Clone()
+        {
+            var s = new GameState();
+            s.Exposure = Exposure; s.Minutes = Minutes; s.Intel = Intel; s.Trust = Trust;
+            foreach (var kv in Flags) s.Flags[kv.Key] = kv.Value;
+            foreach (var kv in Members) s.Members[kv.Key] = kv.Value;
+            s.Notes.AddRange(Notes);
+            return s;
         }
 
         public void AddExposure(int d) { Exposure = Clamp(Exposure + d, 0, 100); }
