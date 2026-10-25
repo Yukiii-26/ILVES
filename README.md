@@ -15,7 +15,7 @@
 |---|---|
 | 运行 | `Builds/Windows/Ilves.exe`（Windows x64） |
 | 内容 | **序章 + 第一章 + 第二章**，首次约 45–60 分钟 |
-| 存档 | 手动存档（暂停菜单）＋ 每章开始自动存档 |
+| 存档 | **3 个手动档位**（保存/读取都要选档）＋ 每章开始自动存档（供「继续游戏」） |
 | 设置 | 1280×720 / 1920×1080 / 2560×1440，窗口 / 全屏 |
 
 **操作**
@@ -26,7 +26,7 @@
 | 1–4 | 选择选项 |
 | 空格 / 回车 | 继续 / 开始任务 |
 | **Backspace** 或界面「← 退回」 | **退回一步（最多两步）** |
-| **Esc** | 暂停菜单（继续 / 保存 / 设置 / 返回主界面 / 退出） |
+| **Esc** | 暂停菜单（继续 / 保存到档位 / 读取存档 / 设置 / 返回主界面 / 退出） |
 | F11 | 全屏切换 |
 
 ![正文与小队状态](docs/screens/02-story.png)
@@ -36,6 +36,8 @@
 ![决策](docs/screens/03-choice.png)
 
 ![暂停菜单](docs/screens/07-pause.png)
+
+![存档档位](docs/screens/08-slots.png)
 
 ![设置](docs/screens/05-settings.png)
 
@@ -63,7 +65,7 @@
 | 平台 | Windows x64（开发期 Mono） |
 | 架构 | `Ilves.Core` 纯 C# 逻辑（无 UnityEngine 依赖）+ `Ilves.UI` 表现层 |
 | 内容 | `Assets/StreamingAssets/content/*.json`（章节 / 节点 / 选项 / 效果） |
-| 存档 | `%USERPROFILE%\AppData\LocalLow\Understory\Ilves\save01.json` |
+| 存档 | `%USERPROFILE%\AppData\LocalLow\Understory\Ilves\save_slot1..3.json`（手动）＋ `save_auto.json`（自动） |
 | 校验 | `Ilves.EditorTools.ContentCheck`：跳转、可达性、全流程、存档往返、简报检查 |
 
 ### 效果 DSL（写在 JSON 的 `effects` 里）

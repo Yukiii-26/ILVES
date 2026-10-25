@@ -25,7 +25,9 @@ namespace Ilves.UI
         static readonly Color Dim = new Color(0.541f, 0.549f, 0.478f);
         static readonly Color Danger = new Color(0.639f, 0.290f, 0.227f);
 
-        enum Phase { Title, Settings, Briefing, Story, Pause, Debrief }
+        enum Phase { Title, Settings, Briefing, Story, Pause, Debrief, Slots }
+        enum SlotMode { Save, Load }
+        static readonly string[] SlotNames = { "存档 01", "存档 02", "存档 03" };
 
         static readonly string[] ChapterFiles = { "prologue.json", "chapter01.json", "chapter02.json" };
         static readonly int[,] Resolutions = { { 1280, 720 }, { 1920, 1080 }, { 2560, 1440 } };
@@ -64,8 +66,12 @@ namespace Ilves.UI
         // 设置
         int _resIndex;
         bool _fullscreen;
-        string _savePath;
+        string _autoPath;
         bool _hasSave;
+        SlotMode _slotMode = SlotMode.Load;
+        bool _noSavePrefs;
+        Phase _slotReturn = Phase.Title;
+        readonly List<SaveData> _slotMeta = new List<SaveData>();
 
         // 样式
         Font _font;
@@ -78,22 +84,36 @@ namespace Ilves.UI
             Application.targetFrameRate = 60;
             LoadFont();
             LoadSettings();
-            _savePath = Path.Combine(Application.persistentDataPath, "save01.json");
+            _autoPath = Path.Combine(Application.persistentDataPath, "save_auto.json");
         }
 
         void Start()
         {
+            string resArg = ArgValue("-res");
+            if (!string.IsNullOrEmpty(resArg))
+            {
+                int rv;
+                if (int.TryParse(resArg, out rv)) { _resIndex = Mathf.Clamp(rv, 0, 2); _noSavePrefs = true; }
+            }
+
             if (HasArg("-autoplay-demo")) { AutoPlay(); return; }
             if (HasArg("-savetest")) { SaveTest(); return; }
             if (HasArg("-debrief")) { ApplyDisplay(); FastForwardToDebrief(); return; }
 
             ApplyDisplay();
-            _hasSave = File.Exists(_savePath);
+            _hasSave = HasAnySave();
 
             string ph = ArgValue("-phase");
             if (ph == "settings") { _settingsReturn = Phase.Title; _phase = Phase.Settings; return; }
             if (ph == "briefing") { BeginNewGame(); return; }
             if (ph == "pause") { JumpTo("n09", 1, Phase.Pause); return; }
+            if (ph == "slots")
+            {
+                JumpTo("n09", 1, Phase.Story);
+                SaveTo(SlotPath(0), true);
+                OpenSlots(SlotMode.Load, Phase.Title);
+                return;
+            }
 
             string jump = ArgValue("-node");
             if (!string.IsNullOrEmpty(jump))
@@ -147,10 +167,18 @@ namespace Ilves.UI
         {
             int w = Resolutions[_resIndex, 0];
             int h = Resolutions[_resIndex, 1];
-            Screen.SetResolution(w, h, _fullscreen ? FullScreenMode.FullScreenWindow : FullScreenMode.Windowed);
-            PlayerPrefs.SetInt("ilves.res", _resIndex);
-            PlayerPrefs.SetInt("ilves.fullscreen", _fullscreen ? 1 : 0);
-            PlayerPrefs.Save();
+            int sw = Screen.currentResolution.width;
+            int sh = Screen.currentResolution.height;
+            int ww = Mathf.Min(w, Mathf.RoundToInt(sw * 0.9f));
+            int wh = Mathf.Min(h, Mathf.RoundToInt(sh * 0.9f));
+            Screen.SetResolution(_fullscreen ? sw : ww, _fullscreen ? sh : wh,
+                _fullscreen ? FullScreenMode.FullScreenWindow : FullScreenMode.Windowed);
+            if (!_noSavePrefs)
+            {
+                PlayerPrefs.SetInt("ilves.res", _resIndex);
+                PlayerPrefs.SetInt("ilves.fullscreen", _fullscreen ? 1 : 0);
+                PlayerPrefs.Save();
+            }
         }
 
         void LoadFont()
@@ -327,22 +355,54 @@ namespace Ilves.UI
         // =====================================================================
         // 存档
         // =====================================================================
-        void AutoSave()
-        {
-            if (_engine == null || _engine.Current == null) return;
-            SaveCurrent(true);
-        }
+        string SlotPath(int index) { return Path.Combine(Application.persistentDataPath, "save_slot" + (index + 1) + ".json"); }
 
-        void SaveCurrent(bool silent)
+        SaveData ReadSlot(string path)
         {
             try
             {
+                if (!File.Exists(path)) return null;
+                return JsonUtility.FromJson<SaveData>(File.ReadAllText(path, Encoding.UTF8));
+            }
+            catch { return null; }
+        }
+
+        void RefreshSlotMeta()
+        {
+            _slotMeta.Clear();
+            for (int i = 0; i < 3; i++) _slotMeta.Add(ReadSlot(SlotPath(i)));
+        }
+
+        bool HasAnySave()
+        {
+            if (File.Exists(_autoPath)) return true;
+            for (int i = 0; i < 3; i++) if (File.Exists(SlotPath(i))) return true;
+            return false;
+        }
+
+        string LatestSavePath()
+        {
+            string best = null, bestTime = null;
+            var paths = new List<string> { _autoPath, SlotPath(0), SlotPath(1), SlotPath(2) };
+            foreach (var p in paths)
+            {
+                var d = ReadSlot(p);
+                if (d == null || string.IsNullOrEmpty(d.savedAt)) continue;
+                if (bestTime == null || string.CompareOrdinal(d.savedAt, bestTime) > 0) { best = p; bestTime = d.savedAt; }
+            }
+            return best;
+        }
+
+        void SaveTo(string path, bool silent)
+        {
+            try
+            {
+                if (_engine == null || _engine.Current == null) return;
                 var data = SaveCodec.Capture(_chapterIndex, _engine.Current.id, _chapter != null ? _chapter.title : "", _state);
-                var json = JsonUtility.ToJson(data, true);
-                Directory.CreateDirectory(Path.GetDirectoryName(_savePath));
-                File.WriteAllText(_savePath, json, new UTF8Encoding(false));
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, JsonUtility.ToJson(data, true), new UTF8Encoding(false));
                 _hasSave = true;
-                if (!silent) _transient = "进度已保存";
+                if (!silent) _transient = "已保存（" + data.savedAt + "）";
             }
             catch (Exception e)
             {
@@ -351,12 +411,17 @@ namespace Ilves.UI
             }
         }
 
-        bool LoadSave()
+        void AutoSave()
+        {
+            if (_engine == null || _engine.Current == null) return;
+            SaveTo(_autoPath, true);
+        }
+
+        bool LoadFrom(string path)
         {
             try
             {
-                if (!File.Exists(_savePath)) return false;
-                var data = JsonUtility.FromJson<SaveData>(File.ReadAllText(_savePath, Encoding.UTF8));
+                var data = ReadSlot(path);
                 if (data == null) return false;
                 _chapterIndex = Mathf.Clamp(data.chapterIndex, 0, ChapterFiles.Length - 1);
                 _chapter = LoadChapter(_chapterIndex);
@@ -364,8 +429,7 @@ namespace Ilves.UI
                 SaveCodec.Apply(data, _state);
                 _history.Clear();
                 _engine = new StoryEngine(_chapter);
-                if (_engine.Get(data.nodeId) == null) _engine = new StoryEngine(_chapter);
-                else _engine.GoTo(data.nodeId);
+                if (_engine.Get(data.nodeId) != null) _engine.GoTo(data.nodeId);
                 EnterNode();
                 _phase = Phase.Story;
                 _transient = "已读取存档（" + data.savedAt + "）";
@@ -377,6 +441,20 @@ namespace Ilves.UI
                 _transient = "读档失败：" + e.Message;
                 return false;
             }
+        }
+
+        void ContinueGame()
+        {
+            string p = LatestSavePath();
+            if (p == null || !LoadFrom(p)) BeginNewGame();
+        }
+
+        void OpenSlots(SlotMode mode, Phase ret)
+        {
+            _slotMode = mode;
+            _slotReturn = ret;
+            RefreshSlotMeta();
+            _phase = Phase.Slots;
         }
 
         // =====================================================================
@@ -421,6 +499,10 @@ namespace Ilves.UI
             {
                 if (Input.GetKeyDown(KeyCode.Escape)) _phase = _settingsReturn;
             }
+            else if (_phase == Phase.Slots)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape)) _phase = _slotReturn;
+            }
         }
 
         // =====================================================================
@@ -445,6 +527,7 @@ namespace Ilves.UI
                 case Phase.Story: DrawStory(true); break;
                 case Phase.Pause: DrawStory(false); DrawPause(); break;
                 case Phase.Debrief: DrawDebrief(); break;
+                case Phase.Slots: DrawSlots(); break;
             }
 
             GUI.matrix = old;
@@ -462,8 +545,8 @@ namespace Ilves.UI
             float bx = W * 0.5f - 160f, by = 396f;
             if (Button(new Rect(bx, by, 320, 44), "新 游 戏")) BeginNewGame();
             GUI.enabled = _hasSave;
-            if (Button(new Rect(bx, by + 52, 320, 44), "继 续 游 戏")) { if (!LoadSave()) BeginNewGame(); }
-            if (Button(new Rect(bx, by + 104, 320, 44), "读 取 存 档")) { if (!LoadSave()) _transient = "没有可读取的存档"; }
+            if (Button(new Rect(bx, by + 52, 320, 44), "继 续 游 戏")) ContinueGame();
+            if (Button(new Rect(bx, by + 104, 320, 44), "读 取 存 档")) OpenSlots(SlotMode.Load, Phase.Title);
             GUI.enabled = true;
             if (Button(new Rect(bx, by + 156, 320, 44), "设 置")) { _settingsReturn = Phase.Title; _phase = Phase.Settings; }
             if (Button(new Rect(bx, by + 208, 320, 44), "退 出")) { Application.Quit(); }
@@ -490,7 +573,7 @@ namespace Ilves.UI
             if (Button(new Rect(80, 330, 340, 52), "窗 口", !_fullscreen)) { _fullscreen = false; ApplyDisplay(); }
             if (Button(new Rect(80 + 380f, 330, 340, 52), "全 屏", _fullscreen)) { _fullscreen = true; ApplyDisplay(); }
 
-            Label(new Rect(80, 420, W - 160, 24), "提示：分辨率为窗口大小时，按比例缩放界面；全屏使用显示器当前分辨率。", _hint);
+            Label(new Rect(80, 420, W - 160, 24), "提示：界面按 16:9 等比缩放；窗口模式会自动限制在屏幕的 90% 以内，避免窗口超出屏幕。", _hint);
             if (Button(new Rect(W * 0.5f - 160f, 560, 320, 46), "返 回")) _phase = _settingsReturn;
         }
 
@@ -594,32 +677,33 @@ namespace Ilves.UI
 
         void DrawSidebar()
         {
-            float x = 848f, y = 96f, w = 376f;   // 右边界 1224，留 56 边距
-            float right = x + w - 24f;
+            float x = 844f, y = 96f, w = 380f;   // 右边界 1224，两侧留白
+            float right = x + w - 32f;
             Fill(new Rect(x, y, w, H - y - 40f), Panel);
             Fill(new Rect(x, y, 1f, H - y - 40f), OliveDim);
+            Fill(new Rect(x + w - 1f, y, 1f, H - y - 40f), OliveDim);
 
             float cy = y + 16f;
-            Label(new Rect(x + 20, cy, w - 40, 20), "小队状态  ·  9 人", _section);
+            Label(new Rect(x + 28, cy, w - 40, 20), "小队状态  ·  9 人", _section);
             cy += 26f;
 
-            Label(new Rect(x + 20, cy, 140, 20), "暴露度", _sideDim);
+            Label(new Rect(x + 28, cy, 140, 20), "暴露度", _sideDim);
             var exSt = new GUIStyle(_side) { alignment = TextAnchor.MiddleRight };
             exSt.normal.textColor = _state.Exposure >= 60 ? Danger : Bone;
             Label(new Rect(right - 170, cy, 170, 20), _state.Exposure + "  " + _state.ExposureLabel(), exSt);
             cy += 24f;
-            Fill(new Rect(x + 20, cy, w - 44, 6), new Color(0.14f, 0.145f, 0.11f));
-            Fill(new Rect(x + 20, cy, (w - 44) * Mathf.Clamp01(_state.Exposure / 100f), 6), _state.Exposure >= 60 ? Danger : Olive);
+            Fill(new Rect(x + 28, cy, w - 60, 6), new Color(0.14f, 0.145f, 0.11f));
+            Fill(new Rect(x + 28, cy, (w - 60) * Mathf.Clamp01(_state.Exposure / 100f), 6), _state.Exposure >= 60 ? Danger : Olive);
             cy += 24f;
 
-            Label(new Rect(x + 20, cy, 160, 20), "情报完整度", _sideDim);
+            Label(new Rect(x + 28, cy, 160, 20), "情报完整度", _sideDim);
             Label(new Rect(right - 110, cy, 110, 20), _state.Intel + " / 6", new GUIStyle(_side) { alignment = TextAnchor.MiddleRight });
             cy += 24f;
 
-            Label(new Rect(x + 20, cy, 160, 20), "队伍信任", _sideDim);
+            Label(new Rect(x + 28, cy, 160, 20), "队伍信任", _sideDim);
             Label(new Rect(right - 110, cy, 110, 20), (_state.Trust >= 0 ? "+" : "") + _state.Trust, new GUIStyle(_side) { alignment = TextAnchor.MiddleRight });
             cy += 32f;
-            Fill(new Rect(x + 20, cy, w - 44, 1), OliveDim);
+            Fill(new Rect(x + 28, cy, w - 60, 1), OliveDim);
             cy += 14f;
 
             for (int i = 0; i < GameState.MemberIds.Length; i++)
@@ -628,7 +712,7 @@ namespace Ilves.UI
                 string status = _state.MemberStatus(id);
                 var nameSt = new GUIStyle(_side);
                 nameSt.normal.textColor = (id == "vasili") ? Olive : Bone;
-                Label(new Rect(x + 20, cy, 150, 20), GameState.MemberNames[i] + (id == "vasili" ? " (你)" : ""), nameSt);
+                Label(new Rect(x + 28, cy, 150, 20), GameState.MemberNames[i] + (id == "vasili" ? " (你)" : ""), nameSt);
                 var stSt = new GUIStyle(_side) { alignment = TextAnchor.MiddleRight };
                 stSt.normal.textColor = StatusColor(status);
                 Label(new Rect(right - 150, cy, 150, 20), status, stSt);
@@ -642,12 +726,12 @@ namespace Ilves.UI
                 {
                     var st = new GUIStyle(_hint);
                     st.normal.textColor = Olive;
-                    Label(new Rect(x + 20, ty + i * 20f, w - 40, 20), "+ " + _toasts[i], st);
+                    Label(new Rect(x + 28, ty + i * 20f, w - 40, 20), "+ " + _toasts[i], st);
                 }
             }
 
             if (!string.IsNullOrEmpty(_transient))
-                Label(new Rect(x + 20, H - 150f, w - 40, 20), _transient, _hint);
+                Label(new Rect(x + 28, H - 150f, w - 40, 20), _transient, _hint);
         }
 
         static Color StatusColor(string status)
@@ -659,23 +743,74 @@ namespace Ilves.UI
             return Dim;
         }
 
+        // ---------- 存档档位 ----------
+        void DrawSlots()
+        {
+            bool saving = _slotMode == SlotMode.Save;
+            Label(new Rect(80, 56, W - 160, 30), saving ? "保 存 进 度" : "读 取 存 档", _section);
+            Label(new Rect(80, 84, W - 160, 60), saving ? "选择档位" : "选择要读取的存档",
+                new GUIStyle(_title) { fontSize = 46, alignment = TextAnchor.UpperLeft });
+            Label(new Rect(80, 150, W - 160, 24),
+                saving ? "当前进度会写入你选择的档位；自动存档（继续游戏用）不受影响。"
+                       : "读取会回到存档当时的那个决定，之后的进度作废。", _hint);
+
+            for (int i = 0; i < 3; i++)
+            {
+                var r = new Rect(80, 192 + i * 118, W - 160, 104);
+                var d = i < _slotMeta.Count ? _slotMeta[i] : null;
+                Fill(r, Panel);
+                Fill(new Rect(r.x, r.y, 3f, r.height), d != null ? Olive : OliveDim);
+                Label(new Rect(r.x + 28, r.y + 16, 140, 24), SlotNames[i], _speaker);
+                if (d == null)
+                {
+                    Label(new Rect(r.x + 180, r.y + 16, 520, 24), "（空档位）", _hint);
+                    Label(new Rect(r.x + 180, r.y + 50, 520, 22), saving ? "可以保存到此档" : "没有可读取的存档", _hint);
+                }
+                else
+                {
+                    Label(new Rect(r.x + 180, r.y + 14, 560, 26), d.chapterTitle + "　·　" + d.savedAt, _side);
+                    Label(new Rect(r.x + 180, r.y + 50, 560, 22),
+                        "暴露 " + d.exposure + "　时间 " + d.minutes + " 分　情报 " + d.intel + "/6　信任 " + d.trust, _hint);
+                }
+
+                var br = new Rect(r.x + r.width - 208, r.y + 28, 180, 46);
+                if (saving)
+                {
+                    if (Button(br, "保 存 到 此")) { SaveTo(SlotPath(i), false); RefreshSlotMeta(); }
+                }
+                else if (d != null)
+                {
+                    if (Button(br, "读 取")) { if (LoadFrom(SlotPath(i))) return; }
+                }
+                else
+                {
+                    Fill(br, new Color(0.07f, 0.075f, 0.055f));
+                    Label(br, "空", Centered(_hint));
+                }
+            }
+
+            if (Button(new Rect(W * 0.5f - 160f, H - 92, 320, 48), "返 回")) _phase = _slotReturn;
+            Label(new Rect(0, H - 36, W, 22), "ESC 返回", Centered(_hint));
+        }
+
         // ---------- 暂停菜单 ----------
         void DrawPause()
         {
             Fill(new Rect(0, 0, W, H), new Color(0f, 0f, 0f, 0.72f));
-            var box = new Rect(W * 0.5f - 200f, 150f, 400f, 420f);
+            var box = new Rect(W * 0.5f - 200f, 96f, 400f, 528f);
             Fill(box, Panel);
             Fill(new Rect(box.x, box.y, 2f, box.height), Olive);
             Label(new Rect(box.x, box.y + 24, box.width, 40), "暂 停", Centered(new GUIStyle(_title) { fontSize = 40 }));
 
-            float bx = box.x + 40f, by = box.y + 100f, bw = box.width - 80f;
+            float bx = box.x + 40f, by = box.y + 108f, bw = box.width - 80f;
             if (Button(new Rect(bx, by, bw, 44), "继 续")) _phase = Phase.Story;
-            if (Button(new Rect(bx, by + 56, bw, 44), "保 存 进 度")) { SaveCurrent(false); }
-            if (Button(new Rect(bx, by + 112, bw, 44), "设 置")) { _settingsReturn = Phase.Pause; _phase = Phase.Settings; }
-            if (Button(new Rect(bx, by + 168, bw, 44), "返 回 主 界 面")) { _hasSave = File.Exists(_savePath); _phase = Phase.Title; }
-            if (Button(new Rect(bx, by + 224, bw, 44), "退 出 游 戏")) Application.Quit();
-            if (!string.IsNullOrEmpty(_transient)) Label(new Rect(bx, by + 282, bw, 24), _transient, Centered(_hint));
-            Label(new Rect(bx, by + 310, bw, 24), "ESC 返回游戏", Centered(_hint));
+            if (Button(new Rect(bx, by + 54, bw, 44), "保 存 到 档 位")) OpenSlots(SlotMode.Save, Phase.Pause);
+            if (Button(new Rect(bx, by + 108, bw, 44), "读 取 存 档")) OpenSlots(SlotMode.Load, Phase.Pause);
+            if (Button(new Rect(bx, by + 162, bw, 44), "设 置")) { _settingsReturn = Phase.Pause; _phase = Phase.Settings; }
+            if (Button(new Rect(bx, by + 216, bw, 44), "返 回 主 界 面")) { _hasSave = HasAnySave(); _phase = Phase.Title; }
+            if (Button(new Rect(bx, by + 270, bw, 44), "退 出 游 戏")) Application.Quit();
+            if (!string.IsNullOrEmpty(_transient)) Label(new Rect(bx, by + 326, bw, 24), _transient, Centered(_hint));
+            Label(new Rect(bx, by + 352, bw, 24), "ESC 返回游戏", Centered(_hint));
         }
 
         // ---------- 复盘 ----------
@@ -713,7 +848,7 @@ namespace Ilves.UI
             }
             y = Line(80, y + 10, "你的决策倾向：谨慎 " + care + "　激进 " + aggr + "　欺骗 " + deceive + "　拖延 " + delay, _bodySmall);
 
-            if (Button(new Rect(80, H - 120, 260, 46), "返 回 主 界 面")) { _hasSave = File.Exists(_savePath); _phase = Phase.Title; }
+            if (Button(new Rect(80, H - 120, 260, 46), "返 回 主 界 面")) { _hasSave = HasAnySave(); _phase = Phase.Title; }
             if (Button(new Rect(360, H - 120, 220, 46), "再 玩 一 次")) BeginNewGame();
         }
 
@@ -771,10 +906,10 @@ namespace Ilves.UI
             _resIndex = 0; _fullscreen = false;
             JumpTo("n09", 1, Phase.Story);
             _state.AddExposure(9); _state.SetFlag("savetest", true);
-            SaveCurrent(true);
+            SaveTo(_autoPath, true);
             int exp = _state.Exposure;
             _state.Reset();
-            bool ok = LoadSave();
+            bool ok = LoadFrom(_autoPath);
             bool pass = ok && _state.Exposure == exp && _state.GetFlag("savetest") &&
                         _engine != null && _engine.Current != null && _engine.Current.id == "n09" && _chapterIndex == 1;
             Debug.Log("[ILVES-SAVETEST] " + (pass ? "PASS" : "FAIL") + " exposure=" + _state.Exposure + " node=" + (_engine.Current != null ? _engine.Current.id : "null") + " chapter=" + _chapterIndex);
