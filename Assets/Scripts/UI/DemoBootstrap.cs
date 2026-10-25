@@ -69,6 +69,7 @@ namespace Ilves.UI
         string _autoPath;
         bool _hasSave;
         SlotMode _slotMode = SlotMode.Load;
+        int _slotDeleteArmed = -1;   // 删除需要点两次确认
         bool _noSavePrefs;
         bool _freezeTyping;   // QA：冻结打字机，便于检查提示行等静态文字
         int _fontLevel = 1;                 // 0=小 1=标准 2=大
@@ -489,8 +490,27 @@ namespace Ilves.UI
         {
             _slotMode = mode;
             _slotReturn = ret;
+            _slotDeleteArmed = -1;
+            _transient = null;
             RefreshSlotMeta();
             _phase = Phase.Slots;
+        }
+
+        void DeleteSlot(int index)
+        {
+            try
+            {
+                if (File.Exists(SlotPath(index))) File.Delete(SlotPath(index));
+                _slotDeleteArmed = -1;
+                RefreshSlotMeta();
+                _hasSave = HasAnySave();
+                _transient = "已删除 " + SlotNames[index];
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[ILVES] 删除存档失败: " + e.Message);
+                _transient = "删除失败：" + e.Message;
+            }
         }
 
         // =====================================================================
@@ -845,9 +865,28 @@ namespace Ilves.UI
                     Fill(br, new Color(0.07f, 0.075f, 0.055f));
                     Label(br, "空", Centered(_hint));
                 }
+
+                if (d != null)
+                {
+                    var dr = new Rect(r.x + r.width - 320, r.y + 28, 102, 46);
+                    bool armed = _slotDeleteArmed == i;
+                    if (Button(dr, armed ? "确认删除" : "删 除", armed))
+                    {
+                        if (armed) DeleteSlot(i);
+                        else { _slotDeleteArmed = i; _transient = "再点一次「确认删除」"; }
+                        return;
+                    }
+                }
+                else if (_slotDeleteArmed == i)
+                {
+                    _slotDeleteArmed = -1;
+                }
             }
 
-            if (Button(new Rect(W * 0.5f - 160f, H - 92, 320, 48), "返 回")) _phase = _slotReturn;
+            if (!string.IsNullOrEmpty(_transient))
+                Label(new Rect(0, H - 136, W, 26), _transient, Centered(_hint));
+
+            if (Button(new Rect(W * 0.5f - 160f, H - 92, 320, 48), "返 回")) { _slotDeleteArmed = -1; _phase = _slotReturn; }
             Label(new Rect(0, H - 36, W, 22), "ESC 返回", Centered(_hint));
         }
 
