@@ -13,7 +13,8 @@
 
 | 项 | 说明 |
 |---|---|
-| 运行 | `Builds/Windows/Ilves.exe`（Windows x64） |
+| 下载 | [Releases &#8594; v0.2](https://github.com/Yukiii-26/ILVES/releases/tag/v0.2)（Windows x64 zip） |
+| 运行 | 解压后 `Ilves.exe`；或本地构建 `Builds/Windows/Ilves.exe` |
 | 内容 | **序章 + 第一章 + 第二章**，首次约 45–60 分钟 |
 | 存档 | **3 个手动档位**（保存/读取都要选档）＋ 每章开始自动存档（供「继续游戏」） |
 | 设置 | 1280×720 / 1920×1080 / 2560×1440，窗口 / 全屏，**界面字号（小 / 标准 / 大，默认标准）** |
@@ -62,9 +63,9 @@
 | 项 | 值 |
 |---|---|
 | 引擎 | Unity 6.3 LTS（`6000.3.27f1`） |
-| 平台 | Windows x64（开发期 Mono） |
+| 平台 | Windows x64（已发布）；Android 构建流程已就绪，待 Android 模块正式安装后打包 |
 | 架构 | `Ilves.Core` 纯 C# 逻辑（无 UnityEngine 依赖）+ `Ilves.UI` 表现层 |
-| 内容 | `Assets/StreamingAssets/content/*.json`（章节 / 节点 / 选项 / 效果） |
+| 内容 | `Assets/Resources/content/*.json`（章节 / 节点 / 选项 / 效果；Resources 以便 Android 读取） |
 | 存档 | `%USERPROFILE%\AppData\LocalLow\Understory\Ilves\save_slot1..3.json`（手动）＋ `save_auto.json`（自动） |
 | 校验 | `Ilves.EditorTools.ContentCheck`：跳转、可达性、全流程、存档往返、简报检查 |
 
@@ -86,8 +87,10 @@ Assets/
   Scripts/Core/        StoryModel / StoryEngine / GameState / EffectParser / SaveCodec（纯逻辑）
   Scripts/UI/          DemoBootstrap（IMGUI 原型界面：菜单 / 简报 / 正文 / 暂停 / 复盘）
   Editor/              DemoBuild（建场景 + 打包）/ ContentCheck（内容与存档校验）
-  StreamingAssets/
+  Resources/
     content/           prologue.json / chapter01.json / chapter02.json
+    fonts/             Noto Sans CJK SC（内置中文字体，OFL）
+    emblem.png         队徽（线稿生成透明通道版）
   Scenes/Main.unity
 docs/
   游戏大纲.md          全篇 6 章结构与剧情大纲
@@ -110,3 +113,11 @@ Unity.exe -batchmode -projectPath . -executeMethod Ilves.EditorTools.DemoBuild.B
 ## 版权
 
 代码、设定、队徽与美术素材版权归作者所有，未经许可不得复制或商用。
+---
+
+## Android（进行中）
+
+构建入口已写好：`Ilves.EditorTools.DemoBuild.BuildAndroidDemo`（ARM64 / IL2CPP / 横屏 / `com.understory.ilves`，产物 `Builds/Android/Ilves.apk`）。
+
+当前卡在 Unity 的前置检查 `Failed to update Android SDK`：手工安装的 SDK/NDK/JDK 版本元数据不被识别。
+正确的做法是在 **Unity Hub → Installs → 6000.3.27f1 → 齿轮 → Add modules** 里勾选 **Android Build Support（含 Android SDK & NDK Tools、OpenJDK）**，装完再执行上面的构建方法即可。

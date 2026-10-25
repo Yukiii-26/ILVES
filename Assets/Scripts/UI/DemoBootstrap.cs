@@ -278,6 +278,10 @@ namespace Ilves.UI
             try
             {
                 string file = ChapterFiles[Mathf.Clamp(index, 0, ChapterFiles.Length - 1)];
+                // 优先从 Resources 读取：Android 上 StreamingAssets 在 APK 内，File IO 不可用
+                var asset = Resources.Load<TextAsset>("content/" + Path.GetFileNameWithoutExtension(file));
+                if (asset != null) return JsonUtility.FromJson<StoryChapter>(asset.text);
+
                 string path = Path.Combine(Application.streamingAssetsPath, "content", file);
                 if (!File.Exists(path)) { Debug.LogError("[ILVES] 缺少内容文件: " + path); return null; }
                 return JsonUtility.FromJson<StoryChapter>(File.ReadAllText(path, Encoding.UTF8));

@@ -31,11 +31,12 @@ namespace Ilves.EditorTools
             EditorApplication.Exit(errors == 0 ? 0 : 1);
         }
 
-        static string ContentDir { get { return Path.Combine(Application.streamingAssetsPath, "content"); } }
-
         static StoryChapter Load(string file)
         {
-            var path = Path.Combine(ContentDir, file);
+            var asset = Resources.Load<TextAsset>("content/" + Path.GetFileNameWithoutExtension(file));
+            if (asset != null) return JsonUtility.FromJson<StoryChapter>(asset.text);
+
+            var path = Path.Combine(Application.streamingAssetsPath, "content", file);
             if (!File.Exists(path)) { Debug.LogError("[ILVES-CHECK] missing " + path); return null; }
             return JsonUtility.FromJson<StoryChapter>(File.ReadAllText(path, Encoding.UTF8));
         }
