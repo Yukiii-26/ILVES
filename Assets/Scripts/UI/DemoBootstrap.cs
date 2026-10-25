@@ -81,6 +81,8 @@ namespace Ilves.UI
         Phase _slotReturn = Phase.Title;
         readonly List<SaveData> _slotMeta = new List<SaveData>();
 
+        Texture2D _emblem;
+
         // 样式
         Font _font;
         GUIStyle _body, _bodySmall, _scene, _speaker, _title, _subtitle, _section, _side, _sideDim, _choiceBig, _verdict, _button, _hint;
@@ -91,6 +93,8 @@ namespace Ilves.UI
         {
             Application.targetFrameRate = 60;
             LoadFont();
+            var sprite = Resources.Load<Sprite>("emblem");
+            _emblem = sprite != null ? sprite.texture : Resources.Load<Texture2D>("emblem");
             LoadSettings();
             _autoPath = Path.Combine(Application.persistentDataPath, "save_auto.json");
         }
@@ -559,6 +563,12 @@ namespace Ilves.UI
         // ---------- 主界面 ----------
         void DrawTitle()
         {
+            if (_emblem != null)
+            {
+                var old = GUI.color; GUI.color = new Color(1f, 1f, 1f, 0.92f);
+                GUI.DrawTexture(new Rect(960, 60, 260, 260), _emblem, ScaleMode.ScaleToFit);
+                GUI.color = old;
+            }
             Label(new Rect(0, 120, W, 130), "ILVES", _title);
             Label(new Rect(0, 250, W, 40), "猞 猁 小 队", _subtitle);
             Fill(new Rect(W * 0.5f - 60, 306, 120, 1), OliveDim);
@@ -577,7 +587,7 @@ namespace Ilves.UI
             if (!string.IsNullOrEmpty(_transient))
                 Label(new Rect(0, 676, W, 24), _transient, Centered(_hint));
             else
-                Label(new Rect(0, 676, W, 24), "v0.2 demo  ·  序章 + 第一章 + 第二章", Centered(_hint));
+                Label(new Rect(0, 676, W, 24), "v0.2  ·  序章 + 第一章 + 第二章  ·  Windows / Android", Centered(_hint));
         }
 
         // ---------- 设置 ----------
@@ -639,7 +649,8 @@ namespace Ilves.UI
         void DrawStory(bool interactive)
         {
             Fill(new Rect(0, 0, W, 54), Panel);
-            Label(new Rect(40, 14, 200, 28), "ILVES", _speaker);
+            if (_emblem != null) GUI.DrawTexture(new Rect(40, 8, 38, 38), _emblem, ScaleMode.ScaleToFit);
+            Label(new Rect(86, 14, 200, 28), "ILVES", _speaker);
             string mid = (_chapter != null ? _chapter.title + " · " + _chapter.subtitle : "");
             Label(new Rect(240, 16, 760, 28), mid, Centered(_bodySmall));
             Label(new Rect(1000, 16, 240, 28), "时间 " + _state.ClockText(), Righted(_bodySmall));
