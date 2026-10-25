@@ -208,6 +208,9 @@ namespace Ilves.UI
 
         void LoadFont()
         {
+            var bundled = Resources.Load<Font>("fonts/NotoSansCJKsc-Regular");
+            if (bundled != null) { _font = bundled; Debug.Log("[ILVES] 使用内置字体 Noto Sans CJK SC"); return; }
+
             string[] candidates = { "Microsoft YaHei UI", "Microsoft YaHei", "DengXian", "SimHei", "SimSun", "Segoe UI" };
             for (int i = 0; i < candidates.Length; i++)
             {
@@ -660,7 +663,14 @@ namespace Ilves.UI
             {
                 if (Button(new Rect(40, 66, 120, 28), "← 退回 (" + _history.Count + ")", false)) Undo();
             }
-            Label(new Rect(1000, 70, 240, 24), "ESC 菜单", Righted(_hint));
+            if (interactive)
+            {
+                if (Button(new Rect(1090, 66, 132, 30), "菜单 (ESC)", false)) _phase = Phase.Pause;
+            }
+            else
+            {
+                Label(new Rect(1000, 70, 240, 24), "ESC 菜单", Righted(_hint));
+            }
 
             var node = _engine != null ? _engine.Current : null;
             if (node == null) return;

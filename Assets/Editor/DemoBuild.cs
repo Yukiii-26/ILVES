@@ -12,6 +12,7 @@ namespace Ilves.EditorTools
     {
         const string ScenePath = "Assets/Scenes/Main.unity";
         const string BuildPath = "Builds/Windows/Ilves.exe";
+        const string AndroidPath = "Builds/Android/Ilves.apk";
 
         public static void BuildDemo()
         {
@@ -39,6 +40,55 @@ namespace Ilves.EditorTools
                 Debug.LogError("[ILVES-BUILD] EXCEPTION " + e);
                 EditorApplication.Exit(1);
             }
+        }
+
+
+        /// <summary>批处理入口：构建 Android APK（只出 ARM64，横屏）。</summary>
+        public static void BuildAndroidDemo()
+        {
+            try
+            {
+                ConfigurePlayer();
+                ConfigureAndroid();
+                CreateScene();
+                var dir = Path.GetDirectoryName(AndroidPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+                EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
+
+                var options = new BuildPlayerOptions
+                {
+                    scenes = new[] { ScenePath },
+                    locationPathName = AndroidPath,
+                    target = BuildTarget.Android,
+                    options = BuildOptions.None
+                };
+                var report = BuildPipeline.BuildPlayer(options);
+                var s = report.summary;
+                Debug.Log("[ILVES-BUILD-ANDROID] result=" + s.result + " size=" + s.totalSize + " errors=" + s.totalErrors + " output=" + s.outputPath);
+                EditorApplication.Exit(s.result == BuildResult.Succeeded ? 0 : 1);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError("[ILVES-BUILD-ANDROID] EXCEPTION " + e);
+                EditorApplication.Exit(1);
+            }
+        }
+
+        static void ConfigureAndroid()
+        {
+            PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "com.understory.ilves");
+            PlayerSettings.Android.bundleVersionCode = 2;
+            EditorUserBuildSettings.buildAppBundle = false;
+            PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+            PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel23;
+            PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
+            PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
+            PlayerSettings.allowedAutorotateToPortrait = false;
+            PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+            PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+            PlayerSettings.allowedAutorotateToLandscapeRight = true;
+            PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
         }
 
         static void ConfigurePlayer()
