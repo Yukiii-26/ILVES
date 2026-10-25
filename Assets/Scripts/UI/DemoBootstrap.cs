@@ -70,7 +70,12 @@ namespace Ilves.UI
         bool _hasSave;
         SlotMode _slotMode = SlotMode.Load;
         bool _noSavePrefs;
-        bool _bigFont;
+        int _fontLevel = 1;                 // 0=小 1=标准 2=大
+        static readonly int[] SideSizes = { 16, 18, 21 };
+        static readonly int[] RowHeights = { 24, 27, 32 };
+        static readonly int[] SectionSizes = { 13, 14, 16 };
+        static readonly int[] HintSizes = { 14, 16, 18 };
+        static readonly int[] SpeakerSizes = { 17, 18, 20 };
         int _sideFontSize = 18;
         int _sideRowH = 27;
         Phase _slotReturn = Phase.Title;
@@ -92,13 +97,15 @@ namespace Ilves.UI
 
         void Start()
         {
-            if (HasArg("-bigfont")) _bigFont = true;
+            if (HasArg("-bigfont")) _fontLevel = 2;
+            string fontArg = ArgValue("-font");
+            if (!string.IsNullOrEmpty(fontArg)) { int fv; if (int.TryParse(fontArg, out fv)) _fontLevel = Mathf.Clamp(fv, 0, 2); }
 
             string resArg = ArgValue("-res");
             if (!string.IsNullOrEmpty(resArg))
             {
                 int rv;
-                if (int.TryParse(resArg, out rv)) { _resIndex = Mathf.Clamp(rv, 0, 2); _noSavePrefs = true; }
+                if (int.TryParse(resArg, out rv)) { _resIndex = Mathf.Clamp(rv, 0, 2); _fullscreen = false; _noSavePrefs = true; }
             }
 
             if (HasArg("-autoplay-demo")) { AutoPlay(); return; }
@@ -166,7 +173,7 @@ namespace Ilves.UI
         {
             _resIndex = Mathf.Clamp(PlayerPrefs.GetInt("ilves.res", 0), 0, 2);
             _fullscreen = PlayerPrefs.GetInt("ilves.fullscreen", 0) == 1;
-            _bigFont = PlayerPrefs.GetInt("ilves.bigfont", 1) == 1;   // 默认大字号：1280×720 下中文更清楚
+            _fontLevel = Mathf.Clamp(PlayerPrefs.GetInt("ilves.fontlevel", 1), 0, 2);
         }
 
         void ApplyDisplay()
@@ -187,9 +194,10 @@ namespace Ilves.UI
             }
         }
 
-        void ApplyFontSetting()
+        void ApplyFontSetting(int level)
         {
-            PlayerPrefs.SetInt("ilves.bigfont", _bigFont ? 1 : 0);
+            _fontLevel = Mathf.Clamp(level, 0, 2);
+            PlayerPrefs.SetInt("ilves.fontlevel", _fontLevel);
             PlayerPrefs.Save();
             _stylesReady = false;
         }
@@ -217,27 +225,27 @@ namespace Ilves.UI
             _bodySmall.normal.textColor = Dim;
             _scene = new GUIStyle(_body) { fontSize = 15 };
             _scene.normal.textColor = OliveDim;
-            _speaker = new GUIStyle(_body) { fontSize = 18 };
+            _speaker = new GUIStyle(_body) { fontSize = SpeakerSizes[_fontLevel] };
             _speaker.normal.textColor = Olive;
             _title = new GUIStyle(_body) { fontSize = 96, wordWrap = false, alignment = TextAnchor.MiddleCenter };
             _title.normal.textColor = Olive;
             _subtitle = new GUIStyle(_body) { fontSize = 22, alignment = TextAnchor.MiddleCenter };
             _subtitle.normal.textColor = Dim;
-            _section = new GUIStyle(_body) { fontSize = _bigFont ? 16 : 14 };
+            _section = new GUIStyle(_body) { fontSize = SectionSizes[_fontLevel] };
             _section.normal.textColor = OliveDim;
-            _sideFontSize = _bigFont ? 21 : 18;
-            _sideRowH = _bigFont ? 32 : 27;
+            _sideFontSize = SideSizes[_fontLevel];
+            _sideRowH = RowHeights[_fontLevel];
             _side = new GUIStyle(_body) { fontSize = _sideFontSize, wordWrap = false };
             _side.normal.textColor = Bone;
             _sideDim = new GUIStyle(_side);
-            _sideDim.normal.textColor = Dim;
+            _sideDim.normal.textColor = new Color(0.64f, 0.65f, 0.55f);   // 次级文字提高对比度，小字号下不发虚
             _choiceBig = new GUIStyle(_body) { fontSize = 20 };
             _verdict = new GUIStyle(_body) { fontSize = 22 };
             _verdict.normal.textColor = Olive;
             _button = new GUIStyle(_body) { fontSize = 19, alignment = TextAnchor.MiddleCenter, wordWrap = false };
             _button.normal.textColor = Bone;
-            _hint = new GUIStyle(_bodySmall) { fontSize = _bigFont ? 18 : 16 };
-            _hint.normal.textColor = OliveDim;
+            _hint = new GUIStyle(_bodySmall) { fontSize = HintSizes[_fontLevel] };
+            _hint.normal.textColor = new Color(0.62f, 0.63f, 0.52f);
             _stylesReady = true;
         }
 
@@ -588,9 +596,10 @@ namespace Ilves.UI
             if (Button(new Rect(80, 330, 340, 52), "窗 口", !_fullscreen)) { _fullscreen = false; ApplyDisplay(); }
             if (Button(new Rect(80 + 380f, 330, 340, 52), "全 屏", _fullscreen)) { _fullscreen = true; ApplyDisplay(); }
 
-            Label(new Rect(80, 400, 400, 30), "界 面 字 号（右侧状态栏）", _section);
-            if (Button(new Rect(80, 430, 340, 52), "标 准", !_bigFont)) { _bigFont = false; ApplyFontSetting(); }
-            if (Button(new Rect(80 + 380f, 430, 340, 52), "大（推荐 1440p 以上）", _bigFont)) { _bigFont = true; ApplyFontSetting(); }
+            Label(new Rect(80, 400, 400, 30), "界 面 字 号（状态栏 / 菜单小字）", _section);
+            if (Button(new Rect(80, 430, 240, 52), "小", _fontLevel == 0)) ApplyFontSetting(0);
+            if (Button(new Rect(80 + 256f, 430, 240, 52), "标 准", _fontLevel == 1)) ApplyFontSetting(1);
+            if (Button(new Rect(80 + 512f, 430, 240, 52), "大", _fontLevel == 2)) ApplyFontSetting(2);
 
             Label(new Rect(80, 520, W - 160, 24), "提示：界面按 16:9 等比缩放；窗口模式会自动限制在屏幕的 90% 以内，避免窗口超出屏幕。", _hint);
             if (Button(new Rect(W * 0.5f - 160f, 600, 320, 46), "返 回")) _phase = _settingsReturn;
@@ -612,12 +621,12 @@ namespace Ilves.UI
 
             if (_chapter.objectives != null && _chapter.objectives.Length > 0)
             {
-                Label(new Rect(900, 230, 300, 24), "任 务 目 标", _section);
+                Label(new Rect(900, 228, 320, 30), "任 务 目 标", _section);
                 float oy = 258f;
                 for (int i = 0; i < _chapter.objectives.Length; i++)
                 {
-                    Label(new Rect(900, oy, 320, 24), "▸ " + _chapter.objectives[i], _side);
-                    oy += 30f;
+                    Label(new Rect(900, oy, 340, 32), "▸ " + _chapter.objectives[i], _side);
+                    oy += 36f;
                 }
             }
 
@@ -632,8 +641,8 @@ namespace Ilves.UI
             Fill(new Rect(0, 0, W, 54), Panel);
             Label(new Rect(40, 14, 200, 28), "ILVES", _speaker);
             string mid = (_chapter != null ? _chapter.title + " · " + _chapter.subtitle : "");
-            Label(new Rect(240, 18, 760, 24), mid, Centered(_bodySmall));
-            Label(new Rect(1000, 18, 240, 24), "时间 " + _state.ClockText(), Righted(_bodySmall));
+            Label(new Rect(240, 16, 760, 28), mid, Centered(_bodySmall));
+            Label(new Rect(1000, 16, 240, 28), "时间 " + _state.ClockText(), Righted(_bodySmall));
             Fill(new Rect(0, 54, W, 1), OliveDim);
 
             if (interactive && _history.Count > 0)
@@ -647,7 +656,7 @@ namespace Ilves.UI
 
             float bx = 56f, by = 96f, bw = 744f;
             if (!string.IsNullOrEmpty(node.scene)) Label(new Rect(bx, by, bw, 22), node.scene, _scene);
-            if (!string.IsNullOrEmpty(node.speaker)) Label(new Rect(bx, by + 26, bw, 26), node.speaker, _speaker);
+            if (!string.IsNullOrEmpty(node.speaker)) Label(new Rect(bx, by + 26, bw, 34), node.speaker, _speaker);
 
             string visible = _textDone ? _fullText : _fullText.Substring(0, Mathf.Clamp(Mathf.FloorToInt(_reveal), 0, _fullText.Length));
             float ty = by + (string.IsNullOrEmpty(node.speaker) ? 26f : 58f);
@@ -778,20 +787,20 @@ namespace Ilves.UI
 
             for (int i = 0; i < 3; i++)
             {
-                var r = new Rect(80, 192 + i * 118, W - 160, 104);
+                var r = new Rect(80, 188 + i * 126, W - 160, 112);
                 var d = i < _slotMeta.Count ? _slotMeta[i] : null;
                 Fill(r, Panel);
                 Fill(new Rect(r.x, r.y, 3f, r.height), d != null ? Olive : OliveDim);
-                Label(new Rect(r.x + 32, r.y + 16, 140, 24), SlotNames[i], _speaker);
+                Label(new Rect(r.x + 32, r.y + 12, 150, 34), SlotNames[i], _speaker);
                 if (d == null)
                 {
-                    Label(new Rect(r.x + 180, r.y + 16, 520, 24), "（空档位）", _hint);
-                    Label(new Rect(r.x + 180, r.y + 50, 520, 22), saving ? "可以保存到此档" : "没有可读取的存档", _hint);
+                    Label(new Rect(r.x + 190, r.y + 12, 520, 34), "（空档位）", _hint);
+                    Label(new Rect(r.x + 190, r.y + 54, 520, 30), saving ? "可以保存到此档" : "没有可读取的存档", _hint);
                 }
                 else
                 {
-                    Label(new Rect(r.x + 180, r.y + 14, 560, 26), d.chapterTitle + "　·　" + d.savedAt, _side);
-                    Label(new Rect(r.x + 180, r.y + 50, 560, 22),
+                    Label(new Rect(r.x + 190, r.y + 10, 560, 36), d.chapterTitle + "　·　" + d.savedAt, _side);
+                    Label(new Rect(r.x + 190, r.y + 54, 560, 30),
                         "暴露 " + d.exposure + "　时间 " + d.minutes + " 分　情报 " + d.intel + "/6　信任 " + d.trust, _hint);
                 }
 
