@@ -72,3 +72,6 @@ desktop.ini
 
 # 含本机个人信息，禁止入库
 docs/环境清单.md
+
+# Unity Android 构建临时目录
+.utmp/
