@@ -1335,7 +1335,8 @@ namespace Ilves.UI
         void DrawMemberProfile()
         {
             Fill(new Rect(0f, 0f, W, H), new Color(0f, 0f, 0f, 0.72f));
-            var box = new Rect(W * 0.5f - 400f, H * 0.5f - 300f, 800f, 600f);
+            // 800x600 → 860x620：更高更宽，一屏多显示 2–3 行；y 在顶栏（54px）下方，不压住标题栏
+            var box = new Rect(W * 0.5f - 430f, 58f, 860f, 620f);
             Fill(box, Panel);
             Fill(new Rect(box.x, box.y, 2f, box.height), Olive);
 
@@ -1778,7 +1779,19 @@ namespace Ilves.UI
             float usable = Mathf.Max(lineH, viewport.height - topOffset);
             float innerH = topOffset + Mathf.Max(lineH, Mathf.Floor(usable / lineH) * lineH);
             float lineArea = Mathf.Max(0f, innerH - topOffset);                        // 能显示的整行总高
-            float contentH = Mathf.Max(0f, Mathf.Round(MeasureText(style, full ?? "", w) / lineH) * lineH);
+            string text = full ?? "";
+            // 真实渲染高度＝最后一行首字的 y + 一行高（GetCursorPixelPosition 是渲染器自己的排版，
+            // 不受 CalcHeight 对中文行距高估/低估的影响）。取三种口径的最大值，宁可多留空白也不切字。
+            float trueH = 0f;
+            if (text.Length > 0)
+            {
+                var content = new GUIContent(text);
+                var bigRect = new Rect(0f, 0f, w, 100000f);
+                float yLast = style.GetCursorPixelPosition(bigRect, content, text.Length - 1).y;
+                if (yLast >= 0f && yLast < 100000f) trueH = yLast + lineH;
+            }
+            float contentH = Mathf.Max(lineH, Mathf.Max(trueH, Mathf.Round(MeasureText(style, text, w) / lineH) * lineH));
+            contentH = Mathf.Round(contentH / lineH) * lineH;
             float maxScroll = Mathf.Max(0f, contentH - lineArea);
 
             if (handleInput)
