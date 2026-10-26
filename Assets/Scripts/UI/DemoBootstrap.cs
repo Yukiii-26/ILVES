@@ -955,7 +955,7 @@ namespace Ilves.UI
             if (!string.IsNullOrEmpty(_transient))
                 Label(new Rect(0, 676, W, 24), _transient, Centered(_hint));
             else
-                Label(new Rect(0, 676, W, 24), "v0.2  ·  序章 + 第一章 + 第二章  ·  Windows / Android", Centered(_hint));
+                Label(new Rect(0, 676, W, 24), "v" + Application.version + "  ·  序章 + 第一章 + 第二章  ·  Windows / Android", Centered(_hint));
         }
 
         // ---------- 设置 ----------
