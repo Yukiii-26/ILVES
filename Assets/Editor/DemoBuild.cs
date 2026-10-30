@@ -80,7 +80,7 @@ namespace Ilves.EditorTools
         static void ConfigureAndroid()
         {
             PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "com.understory.ilves");
-            PlayerSettings.Android.bundleVersionCode = 3;   // 0.2.1
+            PlayerSettings.Android.bundleVersionCode = 4;   // 0.3.0（Android 打包暂停中，先保持三处版本一致）
             EditorUserBuildSettings.buildAppBundle = false;
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel23;
@@ -97,7 +97,7 @@ namespace Ilves.EditorTools
         {
             PlayerSettings.productName = "Ilves";
             PlayerSettings.companyName = "Understory";
-            PlayerSettings.bundleVersion = "0.2.1";
+            PlayerSettings.bundleVersion = "0.3.0";
             PlayerSettings.defaultScreenWidth = 1600;
             PlayerSettings.defaultScreenHeight = 900;
             PlayerSettings.resizableWindow = true;

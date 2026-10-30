@@ -9,27 +9,35 @@
 
 ---
 
-## 现在可以玩（v0.2.1）
+## 现在可以玩（v0.3.0）
 
 | 项 | 说明 |
 |---|---|
-| 下载 | [Releases &#8594; v0.2.1](https://github.com/Yukiii-26/ILVES/releases/tag/v0.2.1)（Windows x64 zip） |
+| 下载 | [Releases &#8594; v0.3.0](https://github.com/Yukiii-26/ILVES/releases/tag/v0.3.0)（Windows x64 zip，约 130 MB） |
 | 美术 | 主界面用的是正式 key art：泰加林黄昏的九人与载具（背景）＋ 橄榄绿标题艺术字 ＋ 独占的 ILVES 应用图标。正文/简报/复盘界面**仍是单色 IMGUI**，照片只做「进门那一张脸」 |
 | 运行 | 解压后 `Ilves.exe`；或本地构建 `Builds/Windows/Ilves.exe` |
 | 内容 | **序章 + 第一章 + 第二章**，首次约 45–60 分钟 |
-| 存档 | **3 个手动档位**（保存/读取都要选档，**可删除**）＋ 每章开始自动存档（供「继续游戏」） |
-| 设置 | 1280×720 / 1920×1080 / 2560×1440，窗口 / 全屏，**界面字号（小 / 标准 / 大，默认标准）** |
+| 音乐 | **3 首**（主界面 1 + 游戏内 2，游戏内按章节奇偶轮换），循环播放；音量四档（关 / 低 / 中 / 高，默认「中」） |
+| 存档 | **6 个手动档位**（保存/读取都要选档，**可删除**）＋ 每章开始自动存档（供「继续游戏」） |
+| 设置 | **两栏**（左栏目 / 右内容）：画面 = 1280×720 / 1920×1080 / 2560×1440、窗口 / 全屏、界面字号（小 / 标准 / 大，默认标准）；声音 = 音乐音量四档与当前曲目；其它 = 版本号、平台、存档路径、「声明」入口、项目主页 |
 
 **操作**
 
 | 键 | 作用 |
 |---|---|
+| 启动 | 先弹「基本提示」；点「我已知悉」或按 空格 / 回车 进入主界面 |
 | 任意键 / 点击 | 开始 |
 | 1–4 | 选择选项 |
 | 空格 / 回车 | 继续 / 开始任务 |
 | **Backspace** 或界面「← 退回」 | **退回一步（最多两步）** |
 | **Esc** | 暂停菜单（继续 / 保存到档位 / 读取存档 / 设置 / 返回主界面 / 退出） |
 | F11 | 全屏切换 |
+
+启动先弹「基本提示」（四条 + 项目主页按钮）；主界面「声明」入口是它的可滚动详细版。
+
+![基本提示](docs/screens/12-notice.png)
+
+![声明](docs/screens/13-declaration.png)
 
 ![正文与小队状态](docs/screens/02-story.png)
 
@@ -67,8 +75,8 @@
 | 平台 | Windows x64（已发布）。Android 构建流程 2026-10-26 已打通（arm64-v8a / IL2CPP），但 **2026-10-30 起负责人要求暂停 APK 更新**，暂不再出包 |
 | 架构 | `Ilves.Core` 纯 C# 逻辑（无 UnityEngine 依赖）+ `Ilves.UI` 表现层 |
 | 内容 | `Assets/Resources/content/*.json`（章节 / 节点 / 选项 / 效果；Resources 以便 Android 读取） |
-| 存档 | `%USERPROFILE%\AppData\LocalLow\Understory\Ilves\save_slot1..3.json`（手动）＋ `save_auto.json`（自动） |
-| 校验 | `Ilves.EditorTools.ContentCheck`：跳转、可达性、全流程、存档往返、简报检查 |
+| 存档 | `%USERPROFILE%\AppData\LocalLow\Understory\Ilves\save_slot1..6.json`（手动）＋ `save_auto.json`（自动） |
+| 校验 | `Ilves.EditorTools.ContentCheck`：跳转、可达性、全流程、存档往返、简报检查、音乐资源与导入参数、合规文案 |
 
 ### 效果 DSL（写在 JSON 的 `effects` 里）
 
@@ -86,12 +94,14 @@ member.igor=受伤                   队员状态（侧栏显示）
 ```
 Assets/
   Scripts/Core/        StoryModel / StoryEngine / GameState / EffectParser / SaveCodec（纯逻辑）
-  Scripts/UI/          DemoBootstrap（IMGUI 原型界面：菜单 / 简报 / 正文 / 暂停 / 复盘）
+  Scripts/UI/          DemoBootstrap（IMGUI 原型界面：主菜单 / 基本提示 / 声明 / 设置 / 简报 / 正文 / 暂停 / 复盘）
   Editor/              DemoBuild（建场景 + 打包 + 图标）/ ContentCheck（内容与存档校验）
                        ArtImportSettings（主界面三张图的导入规格）
+                       AudioImportSettings（音乐导入规格：Streaming / Vorbis q0.7 / PreserveSampleRate）
   Resources/
     content/           prologue.json / chapter01.json / chapter02.json
     fonts/             Noto Sans CJK SC（内置中文字体，OFL）
+    music/             title.flac / story-1.flac / story-2.flac（三首第三方音乐，Streaming + Vorbis）
     emblem.png         队徽（线稿生成透明通道版）
     art/title-logo.png 标题艺术字（黑底键成透明的橄榄绿 ILVES 字标）
     art/title-bg.jpg   主界面背景（泰加林黄昏的九人与载具）
@@ -100,7 +110,7 @@ Assets/
 docs/
   游戏大纲.md          全篇 6 章结构与剧情大纲
   游戏构想.md          玩法与形态（唯一事实源）
-  设定集/              世界观、九人档案、队徽与视觉规范（§3.5 = 标题字标 / 背景 / 图标）
+  设定集/              世界观、九人档案、队徽与视觉规范（§3.5 = 标题字标 / 背景 / 图标；§3.6 = 音乐）
      assets/           三版队徽 + 标题艺术字 + 主界面背景 + 应用图标的原始素材
   初始化记录.md
   交接文档.md          给下一个会话的交接（先读这份）
@@ -117,9 +127,22 @@ Unity.exe -batchmode -projectPath . -executeMethod Ilves.EditorTools.ContentChec
 Unity.exe -batchmode -projectPath . -executeMethod Ilves.EditorTools.DemoBuild.BuildDemo -logFile Logs/build.log
 ```
 
+## 音乐与版权
+
+| 曲目 | 作者 | 用途 | 时长 |
+|---|---|---|---|
+| Ripples | Sean Oban | 主界面（含设置 / 存档 / 声明等所有非游玩界面） | 2:12 |
+| Onthou | Ever So Blue | 游戏内音乐一（序章、第二章…偶数章） | 2:08 |
+| Veloma | Fabrizio Paterlini | 游戏内音乐二（第一章…奇数章） | 2:48 |
+
+工程内是三首 FLAC（`Assets/Resources/music/`）：Unity 6 直接导入，构建时重新编码为 Vorbis，播放走 Streaming。
+
+音乐版权**归原作者所有**，本作仅作**非商业使用**；若权利人认为使用不当，可通过 GitHub 联系移除。游戏内主界面 &#8594;「声明」页是正式声明位置，含完整曲目表与上述说明。
+
 ## 版权
 
-代码、设定、队徽与美术素材版权归作者所有，未经许可不得复制或商用。
+队徽、标题艺术字、主界面背景、应用图标，以及代码与文字的版权归作者所有，未经许可不得复制或商用（音乐版权归原作者，见上一节）。
+
 ---
 
 ## Android（已打通，但暂停更新）

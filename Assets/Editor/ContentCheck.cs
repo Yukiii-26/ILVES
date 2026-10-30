@@ -45,6 +45,8 @@ namespace Ilves.EditorTools
 
                 errors += CheckMembers();
                 errors += CheckArtAssets();
+                errors += CheckAudioAssets();
+                errors += CheckPolicyText();
                 errors += CheckTextPrimitives();
                 errors += Playthrough(chapters);
                 errors += SaveRoundTrip();
@@ -374,6 +376,71 @@ namespace Ilves.EditorTools
                 Debug.LogError("[ILVES-CHECK] 应用图标必须是方图: " + icon.width + "×" + icon.height); errors++;
             }
             if (errors == 0) Debug.Log("[ILVES-CHECK] art assets OK（字标 / 背景 / 图标母版 + 导入参数）");
+            return errors;
+        }
+
+        // ---------- 音乐资源 ----------
+        /// <summary>
+        /// 三首音乐（主界面 1 + 游戏内 2）是否在包内、是否按 Streaming/Vorbis 导入。
+        /// 音乐很容易被误设成 DecompressOnLoad——那样两三分钟的曲子会整段解压进内存，
+        /// 在低配机上是几十 MB 的浪费，而且不报错，只能靠这里卡住。
+        /// </summary>
+        static int CheckAudioAssets()
+        {
+            int errors = 0;
+            var keys = new[] { "music/title", "music/story-1", "music/story-2" };
+            foreach (var k in keys)
+            {
+                var clip = Resources.Load<AudioClip>(k);
+                if (clip == null) { Debug.LogError("[ILVES-CHECK] 缺少音乐 Resources/" + k + "（游戏会在静音下运行）"); errors++; }
+                else Debug.Log("[ILVES-CHECK] music " + k + " len=" + clip.length.ToString("F1") + "s ch=" + clip.channels + " hz=" + clip.frequency);
+            }
+
+            foreach (var p in AudioImportSettings.MusicPaths)
+            {
+                if (!File.Exists(p)) { Debug.LogError("[ILVES-CHECK] 缺少音乐文件: " + p); errors++; continue; }
+                var ai = AssetImporter.GetAtPath(p) as AudioImporter;
+                if (ai == null) { Debug.LogError("[ILVES-CHECK] 音乐文件未按音频导入: " + p); errors++; continue; }
+                var s = ai.defaultSampleSettings;
+                if (s.loadType != AudioClipLoadType.Streaming)
+                {
+                    Debug.LogError("[ILVES-CHECK] " + p + " 必须用 Streaming 加载（当前 " + s.loadType + "），否则整首会解压进内存"); errors++;
+                }
+                if (s.compressionFormat != AudioCompressionFormat.Vorbis)
+                {
+                    Debug.LogError("[ILVES-CHECK] " + p + " 必须用 Vorbis 压缩（当前 " + s.compressionFormat + "）"); errors++;
+                }
+            }
+            if (errors == 0) Debug.Log("[ILVES-CHECK] audio assets OK（3 首音乐 + Streaming/Vorbis 导入参数）");
+            return errors;
+        }
+
+        // ---------- 合规文案 ----------
+        /// <summary>
+        /// 提示 / 声明里的几条硬要求（负责人 2026-10-30 明确要求）：
+        /// 进游戏先弹基本提示、主界面有「声明」入口、四条声明齐全，且主界面描述里那句已删掉的话不许回潮。
+        /// 这些全是文案，编译不过滤、界面不报错，只能靠这里守住。
+        /// </summary>
+        static int CheckPolicyText()
+        {
+            const string uiPath = "Assets/Scripts/UI/DemoBootstrap.cs";
+            if (!File.Exists(uiPath)) return 0;
+            string text = File.ReadAllText(uiPath, Encoding.UTF8);
+            int errors = 0;
+
+            if (text.Contains("你是指挥官"))
+            {
+                Debug.LogError("[ILVES-CHECK] 主界面描述里又出现了『你是指挥官…』——该句已按要求删除"); errors++;
+            }
+            if (!text.Contains("基本提示")) { Debug.LogError("[ILVES-CHECK] 找不到『基本提示』（进游戏时的免责提示）"); errors++; }
+            if (!text.Contains("声 明")) { Debug.LogError("[ILVES-CHECK] 主界面缺少『声明』入口"); errors++; }
+            foreach (var must in new[] { "均为虚构", "完全免费", "不良导向", "版权归原作者" })
+            {
+                if (!text.Contains(must)) { Debug.LogError("[ILVES-CHECK] 提示/声明文案缺少必备内容：「" + must + "」"); errors++; }
+            }
+            if (!text.Contains("github.com/Yukiii-26/ILVES")) { Debug.LogError("[ILVES-CHECK] 提示/声明里没有项目 GitHub 地址"); errors++; }
+
+            if (errors == 0) Debug.Log("[ILVES-CHECK] policy text OK（基本提示 / 声明 / 四条声明 / 项目地址）");
             return errors;
         }
 

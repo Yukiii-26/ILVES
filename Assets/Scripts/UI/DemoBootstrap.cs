@@ -25,9 +25,13 @@ namespace Ilves.UI
         static readonly Color Dim = new Color(0.541f, 0.549f, 0.478f);
         static readonly Color Danger = new Color(0.639f, 0.290f, 0.227f);
 
-        enum Phase { Title, Settings, Briefing, Story, Pause, Debrief, Slots }
+        enum Phase { Notice, Declaration, Title, Settings, Briefing, Story, Pause, Debrief, Slots }
         enum SlotMode { Save, Load }
-        static readonly string[] SlotNames = { "存档 01", "存档 02", "存档 03" };
+        enum SettingsTab { Display, Audio, About }
+
+        // 存档档位数量：界面按 2 列 × 3 行排。加档位只改这个常量 + SlotNames 即可。
+        const int SlotCount = 6;
+        static readonly string[] SlotNames = { "存档 01", "存档 02", "存档 03", "存档 04", "存档 05", "存档 06" };
 
         static readonly string[] ChapterFiles = { "prologue.json", "chapter01.json", "chapter02.json" };
         static readonly int[,] Resolutions = { { 1280, 720 }, { 1920, 1080 }, { 2560, 1440 } };
@@ -99,6 +103,18 @@ namespace Ilves.UI
         Phase _slotReturn = Phase.Title;
         readonly List<SaveData> _slotMeta = new List<SaveData>();
 
+        // 音乐：主界面一首，游戏内两首按章节轮流；档位见 MusicLevels
+        AudioSource _music;
+        AudioClip _musicTitle, _musicStory1, _musicStory2;
+        string _musicKey;        // 当前在放的曲目 key（"title" / "story-1" / "story-2"）
+        int _musicLevel = 2;     // 0 关 / 1 低 / 2 中 / 3 高
+        static readonly float[] MusicLevels = { 0f, 0.28f, 0.55f, 0.85f };
+        static readonly string[] MusicLevelLabels = { "关", "低", "中", "高" };
+
+        SettingsTab _settingsTab = SettingsTab.Display;
+        Phase _declReturn = Phase.Title;   // 「声明」是从主界面还是设置里打开的
+        float _declScroll;
+
         Texture2D _emblem;
         Texture2D _titleBg;      // 主界面背景图（负责人提供的关键美术，铺满后压暗）
         Texture2D _titleLogo;    // 标题艺术字（ILVES 字标，透明底）
@@ -121,6 +137,7 @@ namespace Ilves.UI
             _titleScrim = MakeLeftScrim();
             if (_titleLogo == null) Debug.LogWarning("[ILVES] 缺少 art/title-logo，主界面退回纯文字标题");
             if (_titleBg == null) Debug.LogWarning("[ILVES] 缺少 art/title-bg，主界面退回纯色底");
+            SetupMusic();
             LoadSettings();
             EnsureMembers();
             _autoPath = Path.Combine(Application.persistentDataPath, "save_auto.json");
@@ -154,12 +171,20 @@ namespace Ilves.UI
 
             if (HasArg("-autoplay-demo")) { AutoPlay(); return; }
             if (HasArg("-savetest")) { SaveTest(); return; }
+            if (HasArg("-audiocheck")) { ApplyDisplay(); _phase = Phase.Title; _audioCheck = true; return; }
             if (HasArg("-debrief")) { ApplyDisplay(); FastForwardToDebrief(); return; }
 
             ApplyDisplay();
             _hasSave = HasAnySave();
 
+            // 正常开局先出「基本提示」，点过才进主界面；
+            // 任何 QA 参数都可以配 -skipnotice 跳过它（截图/无头跑流程时用），-typing 默认跳过。
+            _phase = Phase.Notice;
+            if (HasArg("-skipnotice") || HasArg("-typing")) _phase = Phase.Title;
+
             string ph = ArgValue("-phase");
+            if (ph == "notice") { _phase = Phase.Notice; return; }
+            if (ph == "declaration") { _phase = Phase.Declaration; return; }
             if (ph == "settings") { _settingsReturn = Phase.Title; _phase = Phase.Settings; return; }
             if (ph == "briefing") { BeginNewGame(); return; }
             if (ph == "pause") { JumpTo("n09", 1, Phase.Pause); return; }
@@ -219,6 +244,7 @@ namespace Ilves.UI
             _resIndex = Mathf.Clamp(PlayerPrefs.GetInt("ilves.res", 0), 0, 2);
             _fullscreen = PlayerPrefs.GetInt("ilves.fullscreen", 0) == 1;
             _fontLevel = Mathf.Clamp(PlayerPrefs.GetInt("ilves.fontlevel", 1), 0, 2);
+            _musicLevel = Mathf.Clamp(PlayerPrefs.GetInt("ilves.musiclevel", 2), 0, MusicLevels.Length - 1);
         }
 
         void ApplyDisplay()
@@ -741,20 +767,21 @@ namespace Ilves.UI
         void RefreshSlotMeta()
         {
             _slotMeta.Clear();
-            for (int i = 0; i < 3; i++) _slotMeta.Add(ReadSlot(SlotPath(i)));
+            for (int i = 0; i < SlotCount; i++) _slotMeta.Add(ReadSlot(SlotPath(i)));
         }
 
         bool HasAnySave()
         {
             if (File.Exists(_autoPath)) return true;
-            for (int i = 0; i < 3; i++) if (File.Exists(SlotPath(i))) return true;
+            for (int i = 0; i < SlotCount; i++) if (File.Exists(SlotPath(i))) return true;
             return false;
         }
 
         string LatestSavePath()
         {
             string best = null, bestTime = null;
-            var paths = new List<string> { _autoPath, SlotPath(0), SlotPath(1), SlotPath(2) };
+            var paths = new List<string> { _autoPath };
+            for (int i = 0; i < SlotCount; i++) paths.Add(SlotPath(i));
             foreach (var p in paths)
             {
                 var d = ReadSlot(p);
@@ -851,8 +878,40 @@ namespace Ilves.UI
         // =====================================================================
         // Update
         // =====================================================================
+        // QA：-audiocheck 起来后等 2.5 秒，把「音乐到底有没有真的在解码播放」打进 Player.log 再退出
+        bool _audioCheck;
+        float _audioCheckT;
+        float _audioCheckNext;
+
         void Update()
         {
+            UpdateMusic();
+
+            if (_audioCheck)
+            {
+                _audioCheckT += Time.unscaledDeltaTime;
+                if (_audioCheckT > _audioCheckNext)
+                {
+                    bool hasListener = UnityEngine.Object.FindFirstObjectByType<AudioListener>() != null;
+                    Debug.Log("[ILVES-AUDIOCHECK] t=" + _audioCheckT.ToString("F2")
+                              + " key=" + _musicKey
+                              + " clip=" + (_music != null && _music.clip != null ? _music.clip.name : "null")
+                              + " isPlaying=" + (_music != null && _music.isPlaying)
+                              + " audioTime=" + (_music != null ? _music.time.ToString("F3") : "-")
+                              + " dsp=" + AudioSettings.dspTime.ToString("F2")
+                              + " sampleRate=" + AudioSettings.outputSampleRate
+                              + " listener=" + hasListener);
+                    _audioCheckNext += 0.8f;
+                }
+                if (_audioCheckT > 2.6f)
+                {
+                    bool ok = _music != null && _music.clip != null && _music.isPlaying
+                              && _music.time > 0.05f && _music.volume > 0.01f;
+                    Debug.Log("[ILVES-AUDIOCHECK] " + (ok ? "PASS" : "FAIL"));
+                    Application.Quit(ok ? 0 : 1);
+                }
+            }
+
             if (_toastTimer > 0f)
             {
                 _toastTimer -= Time.unscaledDeltaTime;
@@ -904,6 +963,82 @@ namespace Ilves.UI
             {
                 if (Input.GetKeyDown(KeyCode.Escape)) _phase = _slotReturn;
             }
+            else if (_phase == Phase.Notice)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.Return))
+                    _phase = Phase.Title;
+            }
+            else if (_phase == Phase.Declaration)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape)) _phase = _declReturn;
+            }
+        }
+
+        // =====================================================================
+        // 音乐
+        //
+        // 主界面一首、游戏内两首，按章节序号轮流（序章/第二章 → story-1，第一章 → story-2），
+        // 这样连读两章不会一直是同一段旋律。全部从 Resources 走，缺失只是静音，不报错。
+        // =====================================================================
+        void SetupMusic()
+        {
+            _musicTitle = Resources.Load<AudioClip>("music/title");
+            _musicStory1 = Resources.Load<AudioClip>("music/story-1");
+            _musicStory2 = Resources.Load<AudioClip>("music/story-2");
+            if (_musicTitle == null || _musicStory1 == null || _musicStory2 == null)
+                Debug.LogWarning("[ILVES] 音乐资源缺失，将在静音下运行（检查 Resources/music/）");
+
+            // 场景是构建时新建的，里面只有相机和本组件——没有 AudioListener 就是全程静音，且不报错。
+            if (UnityEngine.Object.FindFirstObjectByType<AudioListener>() == null)
+            {
+                gameObject.AddComponent<AudioListener>();
+                Debug.Log("[ILVES] 场景里没有 AudioListener，已在 DemoBootstrap 上补一个");
+            }
+
+            _music = gameObject.GetComponent<AudioSource>();
+            if (_music == null) _music = gameObject.AddComponent<AudioSource>();
+            _music.playOnAwake = false;
+            _music.loop = true;
+            _music.spatialBlend = 0f;
+            _music.volume = MusicLevels[Mathf.Clamp(_musicLevel, 0, MusicLevels.Length - 1)];
+        }
+
+        /// <summary>当前界面该放哪首；只在换界面时真正切歌，不会每帧重启音频。</summary>
+        void UpdateMusic()
+        {
+            if (_music == null) return;
+            string want;
+            switch (_phase)
+            {
+                case Phase.Briefing:
+                case Phase.Story:
+                case Phase.Pause:
+                case Phase.Debrief:
+                    want = (_chapterIndex % 2 == 0) ? "story-1" : "story-2";
+                    break;
+                default:
+                    want = "title";
+                    break;
+            }
+            if (want == _musicKey) return;
+
+            AudioClip clip = want == "title" ? _musicTitle : (want == "story-1" ? _musicStory1 : _musicStory2);
+            _musicKey = want;
+            if (clip == null) { _music.Stop(); return; }
+            _music.clip = clip;
+            _music.volume = MusicLevels[Mathf.Clamp(_musicLevel, 0, MusicLevels.Length - 1)];
+            if (_music.volume <= 0.001f) { _music.Stop(); return; }
+            _music.Play();
+        }
+
+        void ApplyMusicLevel(int level)
+        {
+            _musicLevel = Mathf.Clamp(level, 0, MusicLevels.Length - 1);
+            if (_music != null) _music.volume = MusicLevels[_musicLevel];
+            if (_music != null && MusicLevels[_musicLevel] > 0.001f && !_music.isPlaying && _music.clip != null) _music.Play();
+            if (_music != null && MusicLevels[_musicLevel] <= 0.001f) _music.Stop();
+            PlayerPrefs.SetInt("ilves.musiclevel", _musicLevel);
+            PlayerPrefs.Save();
         }
 
         // =====================================================================
@@ -922,6 +1057,8 @@ namespace Ilves.UI
 
             switch (_phase)
             {
+                case Phase.Notice: DrawNotice(); break;
+                case Phase.Declaration: DrawDeclaration(); break;
                 case Phase.Title: DrawTitle(); break;
                 case Phase.Settings: DrawSettings(); break;
                 case Phase.Briefing: DrawBriefing(); break;
@@ -944,8 +1081,9 @@ namespace Ilves.UI
         const float TitleColX = 92f;      // 左栏左边距
         const float TitleLogoW = 520f;    // 字标宽度（字标原生约 4:1 宽横幅）
         const float TitleBtnW = 320f;
-        const float TitleBtnH = 42f;
-        const float TitleBtnGap = 48f;
+        const float TitleBtnH = 40f;
+        const float TitleBtnGap = 44f;
+        const string ProjectUrl = "https://github.com/Yukiii-26/ILVES";
 
         void DrawTitle()
         {
@@ -977,22 +1115,101 @@ namespace Ilves.UI
             Fill(new Rect(TitleColX, y, 300f, 1f), OliveDim);
             y += 14f;
             Label(new Rect(TitleColX + 6f, y, 480f, 26f), "卡累利阿 · 一支九人侦察小队的故事", _bodySmall);
-            y += 28f;
-            Label(new Rect(TitleColX + 6f, y, 480f, 26f), "你是指挥官。你不扣扳机，你下命令。", _bodySmall);
-            y += 46f;
+            y += 34f;
 
+            // 六项：新游戏 / 继续 / 读档 / 声明 / 设置 / 退出
             if (Button(new Rect(TitleColX, y, TitleBtnW, TitleBtnH), "新 游 戏")) BeginNewGame();
             GUI.enabled = _hasSave;
             if (Button(new Rect(TitleColX, y + TitleBtnGap, TitleBtnW, TitleBtnH), "继 续 游 戏")) ContinueGame();
             if (Button(new Rect(TitleColX, y + TitleBtnGap * 2f, TitleBtnW, TitleBtnH), "读 取 存 档")) OpenSlots(SlotMode.Load, Phase.Title);
             GUI.enabled = true;
-            if (Button(new Rect(TitleColX, y + TitleBtnGap * 3f, TitleBtnW, TitleBtnH), "设 置")) { _settingsReturn = Phase.Title; _phase = Phase.Settings; }
-            if (Button(new Rect(TitleColX, y + TitleBtnGap * 4f, TitleBtnW, TitleBtnH), "退 出")) { Application.Quit(); }
+            if (Button(new Rect(TitleColX, y + TitleBtnGap * 3f, TitleBtnW, TitleBtnH), "声 明")) { _declReturn = Phase.Title; _declScroll = 0f; _phase = Phase.Declaration; }
+            if (Button(new Rect(TitleColX, y + TitleBtnGap * 4f, TitleBtnW, TitleBtnH), "设 置")) { _settingsReturn = Phase.Title; _phase = Phase.Settings; }
+            if (Button(new Rect(TitleColX, y + TitleBtnGap * 5f, TitleBtnW, TitleBtnH), "退 出")) { Application.Quit(); }
 
-            string foot = !string.IsNullOrEmpty(_transient)
-                ? _transient
-                : "v" + Application.version + "  ·  序章 + 第一章 + 第二章  ·  Windows / Android";
-            Label(new Rect(TitleColX + 2f, 668f, 620f, 24f), foot, _hint);
+            // 左下角只写版本号（负责人 2026-10-30 要求）；临时提示单独一行放在按钮下面
+            if (!string.IsNullOrEmpty(_transient))
+                Label(new Rect(TitleColX + 2f, y + TitleBtnGap * 6f + 2f, 620f, 24f), _transient, _hint);
+            Label(new Rect(TitleColX + 2f, 674f, 320f, 24f), "v" + Application.version, _hint);
+        }
+
+        // ---------- 基本提示（进游戏先弹这一面） ----------
+        /// <summary>自适应高度的文字段：用 MeasureText 量真实高度再画，返回下一段的 y（不会压字、不会被切）。</summary>
+        float Block(float x, float y, float w, string text, GUIStyle style, float gap)
+        {
+            float h = Mathf.Max(24f, MeasureText(style, text, w));
+            Label(new Rect(x, y, w, h + 3f), text, style);
+            return y + h + gap;
+        }
+
+        /// <summary>提示/声明通用的暗底卡片：返回卡片矩形。</summary>
+        Rect NoticeCard(float y, float h)
+        {
+            DrawTitleBackdrop();
+            Fill(new Rect(0f, 0f, W, H), new Color(0f, 0f, 0f, 0.42f));
+            var box = new Rect(W * 0.5f - 440f, y, 880f, h);
+            Fill(box, new Color(0.055f, 0.060f, 0.042f, 0.97f));
+            Fill(new Rect(box.x, box.y, 2f, box.height), Olive);
+            return box;
+        }
+
+        void DrawNotice()
+        {
+            var box = NoticeCard(150f, 420f);
+            GUIStyle item = new GUIStyle(_body) { fontSize = 18 };
+            GUIStyle head = new GUIStyle(_body) { fontSize = 30, alignment = TextAnchor.UpperLeft };
+
+            float x = box.x + 44f, w = box.width - 88f;
+            Label(new Rect(x, box.y + 26f, w, 44f), "基 本 提 示", head);
+            Fill(new Rect(x, box.y + 78f, w, 1f), OliveDim);
+
+            float y = box.y + 94f;
+            y = Block(x, y, w, "一、本游戏的故事、人物、部队番号与地名均为虚构，与任何真实的人、组织或事件无关。", item, 10f);
+            y = Block(x, y, w, "二、本游戏完全免费，不含内购、广告或任何形式的盈利行为。项目主页：", item, 4f);
+            y = Block(x, y + 2f, w, ProjectUrl, new GUIStyle(item) { fontSize = 17 }, 10f);
+            y = Block(x, y, w, "三、本游戏不含任何不良导向内容。", item, 10f);
+            y = Block(x, y, w, "四、游戏内音乐版权归原作者所有，仅在本作中非商业性使用。", item, 10f);
+
+            Label(new Rect(x, y + 2f, w, 24f), "更详细的说明见主界面「声明」。", _hint);
+
+            if (Button(new Rect(box.x + box.width * 0.5f - 300f, box.y + box.height - 78f, 280f, 46f),
+                       "我 已 知 悉")) _phase = Phase.Title;
+            if (Button(new Rect(box.x + box.width * 0.5f + 20f, box.y + box.height - 78f, 280f, 46f),
+                       "打开项目主页")) Application.OpenURL(ProjectUrl);
+            Label(new Rect(box.x, box.y + box.height + 6f, box.width, 22f), "空格 / 回车 也可以继续", Centered(_hint));
+        }
+
+        // ---------- 声明（主界面入口，内容比提示更详细） ----------
+        const string DeclarationText =
+            "一、虚构声明\n" +
+            "本游戏的故事情节、人物姓名与呼号、部队番号、地名、任务与事件均为创作虚构，与任何真实的个人、组织、国家、部队或历史事件无关。游戏中出现的俄语术语只用于氛围塑造，不代表任何现实立场。\n\n" +
+            "二、免费与来源\n" +
+            "本游戏完全免费，不含内购、广告、付费下载或任何形式的盈利行为。项目源代码、版本发布与问题反馈都在 GitHub：" + ProjectUrl + "\n\n" +
+            "三、内容导向\n" +
+            "本游戏不含色情、赌博、政治宣传或其它不良导向内容。它是一部以指挥、判断与克制为主题的文字游戏；游戏中的战斗描写意在表现代价，而非渲染暴力。\n\n" +
+            "四、音乐与音频版权\n" +
+            "游戏内音乐版权归原作者所有，本作仅在非商业场景下使用，不作任何商用：\n" +
+            "· Sean Oban — Ripples（主界面）\n" +
+            "· Ever So Blue — Onthou（游戏内音乐一）\n" +
+            "· Fabrizio Paterlini — Veloma（游戏内音乐二）\n" +
+            "若权利人认为使用不当，可通过项目 GitHub 页面联系，我们会在第一时间移除。\n\n" +
+            "五、其它\n" +
+            "美术与文字均由本项目作者创作或持有授权，未经许可不得复制或商用。\n";
+
+        void DrawDeclaration()
+        {
+            var box = NoticeCard(24f, 672f);
+            GUIStyle head = new GUIStyle(_body) { fontSize = 30, alignment = TextAnchor.UpperLeft };
+            float x = box.x + 44f, w = box.width - 88f;
+
+            Label(new Rect(x, box.y + 22f, w, 44f), "声 明", head);
+            Fill(new Rect(x, box.y + 74f, w, 1f), OliveDim);
+
+            var view = new Rect(x, box.y + 88f, w, box.height - 88f - 68f);
+            DrawScrolledText(view, DeclarationText, DeclarationText, new GUIStyle(_body) { fontSize = 16 }, ref _declScroll);
+
+            if (Button(new Rect(box.x + box.width * 0.5f - 300f, box.y + box.height - 60f, 280f, 44f), "返 回")) _phase = _declReturn;
+            if (Button(new Rect(box.x + box.width * 0.5f + 20f, box.y + box.height - 60f, 280f, 44f), "打开项目主页")) Application.OpenURL(ProjectUrl);
         }
 
         /// <summary>
@@ -1050,26 +1267,110 @@ namespace Ilves.UI
         // ---------- 设置 ----------
         void DrawSettings()
         {
-            Label(new Rect(0, 90, W, 60), "设 置", Centered(new GUIStyle(_title) { fontSize = 54 }));
-            Label(new Rect(80, 180, 400, 30), "分 辨 率", _section);
-            for (int i = 0; i < 3; i++)
+            const float NavX = 80f, NavY = 140f, NavW = 420f, NavH = 64f, NavGap = 12f;
+            const float PaneX = 560f, PaneW = 640f, PaneY = 140f;
+
+            Label(new Rect(80, 54, 400, 60), "设 置", new GUIStyle(_title) { fontSize = 46, alignment = TextAnchor.UpperLeft });
+            Fill(new Rect(80, 122, W - 160, 1), OliveDim);
+
+            // ---- 左半部分：栏目 ----
+            string[] tabs = { "画 面", "声 音", "其 它" };
+            for (int i = 0; i < tabs.Length; i++)
             {
-                var r = new Rect(80 + i * 380f, 210, 340, 52);
-                bool active = _resIndex == i;
-                if (Button(r, ResLabels[i], active)) { _resIndex = i; ApplyDisplay(); }
+                var r = new Rect(NavX, NavY + i * (NavH + NavGap), NavW, NavH);
+                bool active = (int)_settingsTab == i;
+                if (Button(r, tabs[i], active)) { _settingsTab = (SettingsTab)i; _transient = null; }
             }
 
-            Label(new Rect(80, 300, 400, 30), "显 示 模 式", _section);
-            if (Button(new Rect(80, 330, 340, 52), "窗 口", !_fullscreen)) { _fullscreen = false; ApplyDisplay(); }
-            if (Button(new Rect(80 + 380f, 330, 340, 52), "全 屏", _fullscreen)) { _fullscreen = true; ApplyDisplay(); }
+            // 右栏提示条（当前栏目说明）
+            Fill(new Rect(PaneX - 40f, NavY, 1f, H - NavY - 150f), new Color(0.14f, 0.145f, 0.11f));
 
-            Label(new Rect(80, 400, 400, 30), "界 面 字 号（状态栏 / 菜单小字）", _section);
-            if (Button(new Rect(80, 430, 240, 52), "小", _fontLevel == 0)) ApplyFontSetting(0);
-            if (Button(new Rect(80 + 256f, 430, 240, 52), "标 准", _fontLevel == 1)) ApplyFontSetting(1);
-            if (Button(new Rect(80 + 512f, 430, 240, 52), "大", _fontLevel == 2)) ApplyFontSetting(2);
+            float y = PaneY;
+            switch (_settingsTab)
+            {
+                case SettingsTab.Display: y = SettingsDisplay(PaneX, PaneW, y); break;
+                case SettingsTab.Audio: y = SettingsAudio(PaneX, PaneW, y); break;
+                default: y = SettingsAbout(PaneX, PaneW, y); break;
+            }
 
-            Label(new Rect(80, 520, W - 160, 24), "提示：界面按 16:9 等比缩放；窗口模式会自动限制在屏幕的 90% 以内，避免窗口超出屏幕。", _hint);
-            if (Button(new Rect(W * 0.5f - 160f, 600, 320, 46), "返 回")) _phase = _settingsReturn;
+            if (!string.IsNullOrEmpty(_transient))
+                Label(new Rect(PaneX, H - 150f, PaneW, 24f), _transient, _hint);
+
+            if (Button(new Rect(W * 0.5f - 160f, H - 92f, 320f, 46f), "返 回")) _phase = _settingsReturn;
+            Label(new Rect(0, H - 34f, W, 22f), "ESC 返回　·　设置即时生效", Centered(_hint));
+        }
+
+        /// <summary>右栏的三档/四档按钮排一行；返回选中项下标（未选中返回 -1）。</summary>
+        int ChoiceRow(float x, float y, float totalW, string[] labels, int current)
+        {
+            int picked = -1;
+            int n = labels.Length;
+            float gap = 12f;
+            float bw = (totalW - gap * (n - 1)) / n;
+            for (int i = 0; i < n; i++)
+            {
+                if (Button(new Rect(x + i * (bw + gap), y, bw, 52f), labels[i], current == i)) picked = i;
+            }
+            return picked;
+        }
+
+        float SettingsDisplay(float x, float w, float y)
+        {
+            Label(new Rect(x, y, w, 28f), "分 辨 率", _section);
+            int ri = ChoiceRow(x, y + 36f, w, ResLabels, _resIndex);
+            if (ri >= 0) { _resIndex = ri; ApplyDisplay(); }
+            y += 108f;
+
+            Label(new Rect(x, y, w, 28f), "显 示 模 式", _section);
+            int fi = ChoiceRow(x, y + 36f, w, new[] { "窗 口", "全 屏" }, _fullscreen ? 1 : 0);
+            if (fi >= 0) { _fullscreen = fi == 1; ApplyDisplay(); }
+            y += 108f;
+
+            Label(new Rect(x, y, w, 28f), "界 面 字 号（状态栏 / 菜单小字）", _section);
+            int si = ChoiceRow(x, y + 36f, w, new[] { "小", "标 准", "大" }, _fontLevel);
+            if (si >= 0) ApplyFontSetting(si);
+            y += 108f;
+
+            y = Block(x, y, w, "提示：界面按 16:9 等比缩放；窗口模式会自动限制在屏幕的 90% 以内，避免窗口超出屏幕。", _hint, 6f);
+            return y;
+        }
+
+        float SettingsAudio(float x, float w, float y)
+        {
+            Label(new Rect(x, y, w, 28f), "音 乐 音 量", _section);
+            int mi = ChoiceRow(x, y + 36f, w, MusicLevelLabels, _musicLevel);
+            if (mi >= 0) ApplyMusicLevel(mi);
+            y += 108f;
+
+            string now = _musicLevel <= 0 ? "当前：静音"
+                       : (_musicKey == null ? "当前：" + MusicLevelLabels[_musicLevel]
+                                            : "当前：" + MusicLevelLabels[_musicLevel] + "　正在播放 " + MusicTrackName(_musicKey));
+            y = Block(x, y, w, now, _bodySmall, 8f);
+            y = Block(x, y, w, "主界面 1 首、游戏内 2 首（按章节轮流）。音乐版权归原作者所有，仅非商业使用；曲目与作者见主界面「声明」。", _hint, 8f);
+            y = Block(x, y, w, "音量档位即时生效，写入本地设置，下次启动保持。", _hint, 8f);
+            return y;
+        }
+
+        static string MusicTrackName(string key)
+        {
+            if (key == "title") return "Ripples";
+            if (key == "story-1") return "Onthou";
+            if (key == "story-2") return "Veloma";
+            return "—";
+        }
+
+        float SettingsAbout(float x, float w, float y)
+        {
+            y = Block(x, y, w, "版本　v" + Application.version, _body, 10f);
+            y = Block(x, y, w, "平台　Windows x64（Unity 6.3 LTS）", _bodySmall, 8f);
+            y = Block(x, y, w, "存档　" + Application.persistentDataPath + "（存档 01–" + SlotCount.ToString("00") + " ＋ 自动存档）", _hint, 8f);
+            y = Block(x, y, w, "项目主页　" + ProjectUrl, _hint, 12f);
+
+            if (Button(new Rect(x, y, 300f, 46f), "查 看 声 明")) { _declReturn = Phase.Settings; _declScroll = 0f; _phase = Phase.Declaration; }
+            if (Button(new Rect(x + 316f, y, 300f, 46f), "打开项目主页")) Application.OpenURL(ProjectUrl);
+            y += 62f;
+            y = Block(x, y, w, "本游戏完全免费，无内购与广告；不含任何不良导向内容。详见「声明」。", _hint, 6f);
+            return y;
         }
 
         // ---------- 任务简报 ----------
@@ -1502,36 +1803,41 @@ namespace Ilves.UI
         void DrawSlots()
         {
             bool saving = _slotMode == SlotMode.Save;
-            Label(new Rect(80, 56, W - 160, 30), saving ? "保 存 进 度" : "读 取 存 档", _section);
-            Label(new Rect(80, 84, W - 160, 60), saving ? "选择档位" : "选择要读取的存档",
-                new GUIStyle(_title) { fontSize = 46, alignment = TextAnchor.UpperLeft });
-            Label(new Rect(80, 150, W - 160, 24),
+            Label(new Rect(80, 38, W - 160, 26), saving ? "保 存 进 度" : "读 取 存 档", _section);
+            Label(new Rect(80, 62, W - 160, 54), saving ? "选择档位" : "选择要读取的存档",
+                new GUIStyle(_title) { fontSize = 40, alignment = TextAnchor.UpperLeft });
+            Label(new Rect(80, 116, W - 160, 24),
                 saving ? "当前进度会写入你选择的档位；自动存档（继续游戏用）不受影响。"
                        : "读取会回到存档当时的那个决定，之后的进度作废。", _hint);
 
-            for (int i = 0; i < 3; i++)
+            // 单列 6 行（每行 68px）：一屏放得下，不用滚动；行窄反而给信息留出整行宽度
+            const float RowH = 68f, RowGap = 8f;
+            for (int i = 0; i < SlotCount; i++)
             {
-                var r = new Rect(80, 188 + i * 126, W - 160, 112);
+                var r = new Rect(80, 152 + i * (RowH + RowGap), W - 160, RowH);
                 var d = i < _slotMeta.Count ? _slotMeta[i] : null;
                 Fill(r, Panel);
                 Fill(new Rect(r.x, r.y, 3f, r.height), d != null ? Olive : OliveDim);
-                Label(new Rect(r.x + 32, r.y + 12, 150, 34), SlotNames[i], _speaker);
+
+                Label(new Rect(r.x + 24, r.y + 17, 122, 32), SlotNames[i], _speaker);
                 if (d == null)
                 {
-                    Label(new Rect(r.x + 190, r.y + 12, 520, 34), "（空档位）", _hint);
-                    Label(new Rect(r.x + 190, r.y + 54, 520, 30), saving ? "可以保存到此档" : "没有可读取的存档", _hint);
+                    LabelClipH(new Rect(r.x + 152, r.y + 10, 640, 26), "（空档位）", _side);
+                    LabelClipH(new Rect(r.x + 152, r.y + 38, 640, 22), saving ? "可以保存到此档" : "没有可读取的存档", _hint);
                 }
                 else
                 {
-                    Label(new Rect(r.x + 190, r.y + 10, 560, 36), d.chapterTitle + "　·　" + d.savedAt, _side);
-                    Label(new Rect(r.x + 190, r.y + 54, 560, 30),
+                    // 秒不显示：存档时间精确到分钟就够，多出来的 :xx 只会把行挤断
+                    string when = d.savedAt != null && d.savedAt.Length > 16 ? d.savedAt.Substring(0, 16) : d.savedAt;
+                    LabelClipH(new Rect(r.x + 152, r.y + 8, 640, 28), d.chapterTitle + "　·　" + when, _side);
+                    LabelClipH(new Rect(r.x + 152, r.y + 36, 640, 22),
                         "暴露 " + d.exposure + "　时间 " + d.minutes + " 分　情报 " + d.intel + "/6　信任 " + d.trust, _hint);
                 }
 
-                var br = new Rect(r.x + r.width - 208, r.y + 28, 180, 46);
+                var br = new Rect(r.x + r.width - 180, r.y + 12, 170, 44);
                 if (saving)
                 {
-                    if (Button(br, "保 存 到 此")) { SaveTo(SlotPath(i), false); RefreshSlotMeta(); }
+                    if (Button(br, "保 存")) { SaveTo(SlotPath(i), false); RefreshSlotMeta(); }
                 }
                 else if (d != null)
                 {
@@ -1545,12 +1851,12 @@ namespace Ilves.UI
 
                 if (d != null)
                 {
-                    var dr = new Rect(r.x + r.width - 320, r.y + 28, 102, 46);
+                    var dr = new Rect(r.x + r.width - 300, r.y + 12, 110, 44);
                     bool armed = _slotDeleteArmed == i;
-                    if (Button(dr, armed ? "确认删除" : "删 除", armed))
+                    if (Button(dr, armed ? "确认" : "删 除", armed))
                     {
                         if (armed) DeleteSlot(i);
-                        else { _slotDeleteArmed = i; _transient = "再点一次「确认删除」"; }
+                        else { _slotDeleteArmed = i; _transient = "再点一次「确认」删除 " + SlotNames[i]; }
                         return;
                     }
                 }
@@ -1561,10 +1867,10 @@ namespace Ilves.UI
             }
 
             if (!string.IsNullOrEmpty(_transient))
-                Label(new Rect(0, H - 136, W, 26), _transient, Centered(_hint));
+                Label(new Rect(80, 608, W - 160, 24), _transient, _hint);
 
-            if (Button(new Rect(W * 0.5f - 160f, H - 92, 320, 48), "返 回")) { _slotDeleteArmed = -1; _phase = _slotReturn; }
-            Label(new Rect(0, H - 36, W, 22), "ESC 返回", Centered(_hint));
+            if (Button(new Rect(W * 0.5f - 160f, 636, 320, 46), "返 回")) { _slotDeleteArmed = -1; _phase = _slotReturn; }
+            Label(new Rect(0, 690, W, 22), "ESC 返回", Centered(_hint));
         }
 
         // ---------- 暂停菜单 ----------
