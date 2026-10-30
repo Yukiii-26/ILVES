@@ -44,6 +44,7 @@ namespace Ilves.EditorTools
                 }
 
                 errors += CheckMembers();
+                errors += CheckArtAssets();
                 errors += CheckTextPrimitives();
                 errors += Playthrough(chapters);
                 errors += SaveRoundTrip();
@@ -327,6 +328,52 @@ namespace Ilves.EditorTools
             }
 
             if (errors == 0) Debug.Log("[ILVES-CHECK] members.json OK members=" + roster.members.Length);
+            return errors;
+        }
+
+        // ---------- 主界面美术资源 ----------
+        /// <summary>
+        /// 主界面用到的三张图：标题字标 / 背景图 / 应用图标母版。
+        /// 除了「文件在不在」，还核对导入参数（mipmap 关、非 2 幂不缩放、字标不压缩、
+        /// 图标是 Default 贴图且为方图）——这几项一旦被 Inspector 误改，
+        /// 画面只会静默变脏（字标一圈灰边、背景出色带、exe 图标糊），不会报任何错。
+        /// </summary>
+        static int CheckArtAssets()
+        {
+            int errors = 0;
+
+            var logo = Resources.Load<Texture2D>("art/title-logo");
+            if (logo == null) { Debug.LogError("[ILVES-CHECK] 缺少 Resources/art/title-logo（主界面标题艺术字）——会退回纯文字标题"); errors++; }
+            else Debug.Log("[ILVES-CHECK] art title-logo " + logo.width + "×" + logo.height);
+
+            var bg = Resources.Load<Texture2D>("art/title-bg");
+            if (bg == null) { Debug.LogError("[ILVES-CHECK] 缺少 Resources/art/title-bg（主界面背景图）——会退回纯色底"); errors++; }
+            else Debug.Log("[ILVES-CHECK] art title-bg " + bg.width + "×" + bg.height);
+
+            foreach (var p in ArtImportSettings.ArtPaths)
+            {
+                if (!File.Exists(p)) { Debug.LogError("[ILVES-CHECK] 缺少美术文件: " + p); errors++; continue; }
+                var ti = AssetImporter.GetAtPath(p) as TextureImporter;
+                if (ti == null) { Debug.LogError("[ILVES-CHECK] 美术文件未按贴图导入: " + p); errors++; continue; }
+                if (ti.mipmapEnabled) { Debug.LogError("[ILVES-CHECK] " + p + " 必须关闭 mipmap（界面直绘会发虚）"); errors++; }
+                if (ti.npotScale != TextureImporterNPOTScale.None) { Debug.LogError("[ILVES-CHECK] " + p + " 不能做 2 的幂缩放（npotScale 必须是 None）"); errors++; }
+                if (ti.maxTextureSize < 1024) { Debug.LogError("[ILVES-CHECK] " + p + " 的 maxTextureSize 太小（" + ti.maxTextureSize + "）"); errors++; }
+                if (p == ArtImportSettings.TitleLogoPath && ti.textureCompression != TextureImporterCompression.Uncompressed)
+                {
+                    Debug.LogError("[ILVES-CHECK] 标题字标必须不压缩（压缩会给 alpha 柔边压出灰边）"); errors++;
+                }
+                if (p == ArtImportSettings.IconPath && ti.textureType != TextureImporterType.Default)
+                {
+                    Debug.LogError("[ILVES-CHECK] 应用图标母版必须是 Default 贴图类型（Sprite 类型不能被构建期拿去生成 .ico）"); errors++;
+                }
+            }
+
+            var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(ArtImportSettings.IconPath);
+            if (icon != null && icon.width != icon.height)
+            {
+                Debug.LogError("[ILVES-CHECK] 应用图标必须是方图: " + icon.width + "×" + icon.height); errors++;
+            }
+            if (errors == 0) Debug.Log("[ILVES-CHECK] art assets OK（字标 / 背景 / 图标母版 + 导入参数）");
             return errors;
         }
 

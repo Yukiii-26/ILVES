@@ -100,6 +100,9 @@ namespace Ilves.UI
         readonly List<SaveData> _slotMeta = new List<SaveData>();
 
         Texture2D _emblem;
+        Texture2D _titleBg;      // 主界面背景图（负责人提供的关键美术，铺满后压暗）
+        Texture2D _titleLogo;    // 标题艺术字（ILVES 字标，透明底）
+        Texture2D _titleScrim;   // 运行时生成的左侧横向渐变，保证左栏文字在任何背景上都可读
 
         // 样式
         Font _font;
@@ -113,6 +116,11 @@ namespace Ilves.UI
             LoadFont();
             var sprite = Resources.Load<Sprite>("emblem");
             _emblem = sprite != null ? sprite.texture : Resources.Load<Texture2D>("emblem");
+            _titleBg = Resources.Load<Texture2D>("art/title-bg");
+            _titleLogo = Resources.Load<Texture2D>("art/title-logo");
+            _titleScrim = MakeLeftScrim();
+            if (_titleLogo == null) Debug.LogWarning("[ILVES] 缺少 art/title-logo，主界面退回纯文字标题");
+            if (_titleBg == null) Debug.LogWarning("[ILVES] 缺少 art/title-bg，主界面退回纯色底");
             LoadSettings();
             EnsureMembers();
             _autoPath = Path.Combine(Application.persistentDataPath, "save_auto.json");
@@ -929,33 +937,114 @@ namespace Ilves.UI
         }
 
         // ---------- 主界面 ----------
+        // 视觉：负责人提供的主界面背景图（九人与载具）+ 标题艺术字（ILVES 字标）。
+        // 版式：内容整列靠左——背景图左侧本来就是压暗的留白区，右侧是主体人像，
+        //       按钮压到人像上会脏；左栏再叠一道黑色横向渐变，任何背景亮度下文字都可读。
+        // 两张图任一缺失都会自动退回旧版（纯文字标题 / 纯色底），不会白屏。
+        const float TitleColX = 92f;      // 左栏左边距
+        const float TitleLogoW = 520f;    // 字标宽度（字标原生约 4:1 宽横幅）
+        const float TitleBtnW = 320f;
+        const float TitleBtnH = 42f;
+        const float TitleBtnGap = 48f;
+
         void DrawTitle()
         {
-            if (_emblem != null)
+            DrawTitleBackdrop();
+
+            float y = 88f;
+
+            // 标题艺术字：宽高比按贴图实测比例算，换图不用改代码
+            if (_titleLogo != null)
             {
-                var old = GUI.color; GUI.color = new Color(1f, 1f, 1f, 0.92f);
-                GUI.DrawTexture(new Rect(960, 60, 260, 260), _emblem, ScaleMode.ScaleToFit);
+                float lh = TitleLogoW * _titleLogo.height / Mathf.Max(1f, _titleLogo.width);
+                var old = GUI.color;
+                GUI.color = new Color(1f, 1f, 1f, 0.97f);
+                GUI.DrawTexture(new Rect(TitleColX, y, TitleLogoW, lh), _titleLogo, ScaleMode.ScaleToFit, true);
+                GUI.color = old;
+                y += lh + 16f;
+            }
+            else
+            {
+                Label(new Rect(TitleColX - 8f, y - 14f, TitleLogoW + 40f, 120f), "ILVES",
+                      new GUIStyle(_title) { alignment = TextAnchor.UpperLeft });
+                y += 108f;
+            }
+
+            Label(new Rect(TitleColX + 6f, y, TitleLogoW, 36f), "猞 猁 小 队",
+                  new GUIStyle(_subtitle) { alignment = TextAnchor.UpperLeft });
+            y += 44f;
+
+            Fill(new Rect(TitleColX, y, 300f, 1f), OliveDim);
+            y += 14f;
+            Label(new Rect(TitleColX + 6f, y, 480f, 26f), "卡累利阿 · 一支九人侦察小队的故事", _bodySmall);
+            y += 28f;
+            Label(new Rect(TitleColX + 6f, y, 480f, 26f), "你是指挥官。你不扣扳机，你下命令。", _bodySmall);
+            y += 46f;
+
+            if (Button(new Rect(TitleColX, y, TitleBtnW, TitleBtnH), "新 游 戏")) BeginNewGame();
+            GUI.enabled = _hasSave;
+            if (Button(new Rect(TitleColX, y + TitleBtnGap, TitleBtnW, TitleBtnH), "继 续 游 戏")) ContinueGame();
+            if (Button(new Rect(TitleColX, y + TitleBtnGap * 2f, TitleBtnW, TitleBtnH), "读 取 存 档")) OpenSlots(SlotMode.Load, Phase.Title);
+            GUI.enabled = true;
+            if (Button(new Rect(TitleColX, y + TitleBtnGap * 3f, TitleBtnW, TitleBtnH), "设 置")) { _settingsReturn = Phase.Title; _phase = Phase.Settings; }
+            if (Button(new Rect(TitleColX, y + TitleBtnGap * 4f, TitleBtnW, TitleBtnH), "退 出")) { Application.Quit(); }
+
+            string foot = !string.IsNullOrEmpty(_transient)
+                ? _transient
+                : "v" + Application.version + "  ·  序章 + 第一章 + 第二章  ·  Windows / Android";
+            Label(new Rect(TitleColX + 2f, 668f, 620f, 24f), foot, _hint);
+        }
+
+        /// <summary>
+        /// 主界面背景：背景图等比裁切铺满（ScaleAndCrop＝cover），
+        /// 上面压一层整体暗化 + 一道左侧横向渐变；右半边的关键美术基本保持原样。
+        /// </summary>
+        void DrawTitleBackdrop()
+        {
+            if (_titleBg == null)
+            {
+                Fill(new Rect(0f, 0f, W, H), Bg);
+                return;
+            }
+            var old = GUI.color;
+            GUI.color = Color.white;
+            GUI.DrawTexture(new Rect(0f, 0f, W, H), _titleBg, ScaleMode.ScaleAndCrop, true);
+            GUI.color = old;
+
+            // 整体暗化：这张是带天光的照片，不压下去橄榄绿文字就压不住
+            Fill(new Rect(0f, 0f, W, H), new Color(0.024f, 0.031f, 0.016f, 0.34f));
+
+            // 左侧渐变（覆盖左侧 74% 宽）：背景图左缘本身是暗的，叠上去刚好接住
+            if (_titleScrim != null)
+            {
+                GUI.color = Color.white;
+                GUI.DrawTexture(new Rect(0f, 0f, W * 0.74f, H), _titleScrim, ScaleMode.StretchToFill, true);
                 GUI.color = old;
             }
-            Label(new Rect(0, 120, W, 130), "ILVES", _title);
-            Label(new Rect(0, 250, W, 40), "猞 猁 小 队", _subtitle);
-            Fill(new Rect(W * 0.5f - 60, 306, 120, 1), OliveDim);
-            Label(new Rect(0, 322, W, 30), "卡累利阿 · 一支九人侦察小队的故事", Centered(_bodySmall));
-            Label(new Rect(0, 356, W, 30), "你是指挥官。你不扣扳机，你下命令。", Centered(_bodySmall));
+        }
 
-            float bx = W * 0.5f - 160f, by = 396f;
-            if (Button(new Rect(bx, by, 320, 44), "新 游 戏")) BeginNewGame();
-            GUI.enabled = _hasSave;
-            if (Button(new Rect(bx, by + 52, 320, 44), "继 续 游 戏")) ContinueGame();
-            if (Button(new Rect(bx, by + 104, 320, 44), "读 取 存 档")) OpenSlots(SlotMode.Load, Phase.Title);
-            GUI.enabled = true;
-            if (Button(new Rect(bx, by + 156, 320, 44), "设 置")) { _settingsReturn = Phase.Title; _phase = Phase.Settings; }
-            if (Button(new Rect(bx, by + 208, 320, 44), "退 出")) { Application.Quit(); }
-
-            if (!string.IsNullOrEmpty(_transient))
-                Label(new Rect(0, 676, W, 24), _transient, Centered(_hint));
-            else
-                Label(new Rect(0, 676, W, 24), "v" + Application.version + "  ·  序章 + 第一章 + 第二章  ·  Windows / Android", Centered(_hint));
+        /// <summary>
+        /// 生成 256×1 的黑色横向渐变贴图（左实右透），用作主界面左栏遮罩。
+        /// 不用外部资源：透明通道就是 alpha，任何分辨率下都不会有渐变条带。
+        /// </summary>
+        static Texture2D MakeLeftScrim()
+        {
+            const int n = 256;
+            var tex = new Texture2D(n, 1, TextureFormat.RGBA32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+            tex.name = "title-left-scrim";
+            var px = new Color32[n];
+            for (int i = 0; i < n; i++)
+            {
+                float u = i / (float)(n - 1);
+                float t = Mathf.Clamp01(1f - u / 0.80f);           // u>=0.80 完全透明
+                float a = 0.94f * Mathf.Pow(t, 1.35f);
+                px[i] = new Color32(3, 4, 2, (byte)Mathf.RoundToInt(a * 255f));
+            }
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            return tex;
         }
 
         // ---------- 设置 ----------

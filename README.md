@@ -9,11 +9,12 @@
 
 ---
 
-## 现在可以玩（v0.2 demo）
+## 现在可以玩（v0.2.1）
 
 | 项 | 说明 |
 |---|---|
-| 下载 | [Releases &#8594; v0.2](https://github.com/Yukiii-26/ILVES/releases/tag/v0.2)（Windows x64 zip） |
+| 下载 | [Releases &#8594; v0.2.1](https://github.com/Yukiii-26/ILVES/releases/tag/v0.2.1)（Windows x64 zip） |
+| 美术 | 主界面用的是正式 key art：泰加林黄昏的九人与载具（背景）＋ 橄榄绿标题艺术字 ＋ 独占的 ILVES 应用图标。正文/简报/复盘界面**仍是单色 IMGUI**，照片只做「进门那一张脸」 |
 | 运行 | 解压后 `Ilves.exe`；或本地构建 `Builds/Windows/Ilves.exe` |
 | 内容 | **序章 + 第一章 + 第二章**，首次约 45–60 分钟 |
 | 存档 | **3 个手动档位**（保存/读取都要选档，**可删除**）＋ 每章开始自动存档（供「继续游戏」） |
@@ -63,7 +64,7 @@
 | 项 | 值 |
 |---|---|
 | 引擎 | Unity 6.3 LTS（`6000.3.27f1`） |
-| 平台 | Windows x64（已发布）；Android 构建流程已就绪，待 Android 模块正式安装后打包 |
+| 平台 | Windows x64（已发布）。Android 构建流程 2026-10-26 已打通（arm64-v8a / IL2CPP），但 **2026-10-30 起负责人要求暂停 APK 更新**，暂不再出包 |
 | 架构 | `Ilves.Core` 纯 C# 逻辑（无 UnityEngine 依赖）+ `Ilves.UI` 表现层 |
 | 内容 | `Assets/Resources/content/*.json`（章节 / 节点 / 选项 / 效果；Resources 以便 Android 读取） |
 | 存档 | `%USERPROFILE%\AppData\LocalLow\Understory\Ilves\save_slot1..3.json`（手动）＋ `save_auto.json`（自动） |
@@ -86,17 +87,23 @@ member.igor=受伤                   队员状态（侧栏显示）
 Assets/
   Scripts/Core/        StoryModel / StoryEngine / GameState / EffectParser / SaveCodec（纯逻辑）
   Scripts/UI/          DemoBootstrap（IMGUI 原型界面：菜单 / 简报 / 正文 / 暂停 / 复盘）
-  Editor/              DemoBuild（建场景 + 打包）/ ContentCheck（内容与存档校验）
+  Editor/              DemoBuild（建场景 + 打包 + 图标）/ ContentCheck（内容与存档校验）
+                       ArtImportSettings（主界面三张图的导入规格）
   Resources/
     content/           prologue.json / chapter01.json / chapter02.json
     fonts/             Noto Sans CJK SC（内置中文字体，OFL）
     emblem.png         队徽（线稿生成透明通道版）
+    art/title-logo.png 标题艺术字（黑底键成透明的橄榄绿 ILVES 字标）
+    art/title-bg.jpg   主界面背景（泰加林黄昏的九人与载具）
+  Art/icon.png         应用图标母版（1024×1024，构建期生成全部平台槽位）
   Scenes/Main.unity
 docs/
   游戏大纲.md          全篇 6 章结构与剧情大纲
   游戏构想.md          玩法与形态（唯一事实源）
-  设定集/              世界观、九人档案、队徽与视觉规范
-  工程初始化记录.md
+  设定集/              世界观、九人档案、队徽与视觉规范（§3.5 = 标题字标 / 背景 / 图标）
+     assets/           三版队徽 + 标题艺术字 + 主界面背景 + 应用图标的原始素材
+  初始化记录.md
+  交接文档.md          给下一个会话的交接（先读这份）
   screens/             demo 截图
 ```
 
@@ -115,9 +122,10 @@ Unity.exe -batchmode -projectPath . -executeMethod Ilves.EditorTools.DemoBuild.B
 代码、设定、队徽与美术素材版权归作者所有，未经许可不得复制或商用。
 ---
 
-## Android（进行中）
+## Android（已打通，但暂停更新）
 
-构建入口已写好：`Ilves.EditorTools.DemoBuild.BuildAndroidDemo`（ARM64 / IL2CPP / 横屏 / `com.understory.ilves`，产物 `Builds/Android/Ilves.apk`）。
+构建入口：`Ilves.EditorTools.DemoBuild.BuildAndroidDemo`（ARM64 / IL2CPP / 横屏 / `com.understory.ilves`，产物 `Builds/Android/Ilves.apk`）。
 
-当前卡在 Unity 的前置检查 `Failed to update Android SDK`：手工安装的 SDK/NDK/JDK 版本元数据不被识别。
-正确的做法是在 **Unity Hub → Installs → 6000.3.27f1 → 齿轮 → Add modules** 里勾选 **Android Build Support（含 Android SDK & NDK Tools、OpenJDK）**，装完再执行上面的构建方法即可。
+2026-10-26 曾把 `Failed to update Android SDK` 的问题彻底修好（根因是 SDK 根目录遗留的旧 `source.properties` 与重复解压目录、外加 NDK 版本不对），当时成功出过 APK（约 30 MB / arm64-v8a / versionCode 3）。修法记在 `docs/交接文档.md` §7。
+
+**2026-10-30 起：负责人要求暂停所有 Android APK 更新，不再构建、不再装包。** Windows 是唯一发布平台；iOS/Android 何时恢复由负责人决定。

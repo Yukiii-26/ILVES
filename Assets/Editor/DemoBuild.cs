@@ -1,5 +1,6 @@
 using System.IO;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -13,6 +14,7 @@ namespace Ilves.EditorTools
         const string ScenePath = "Assets/Scenes/Main.unity";
         const string BuildPath = "Builds/Windows/Ilves.exe";
         const string AndroidPath = "Builds/Android/Ilves.apk";
+        const string IconPath = "Assets/Art/icon.png";
 
         public static void BuildDemo()
         {
@@ -103,6 +105,58 @@ namespace Ilves.EditorTools
             PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
             PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Standalone, "com.understory.ilves");
             EditorSettings.defaultBehaviorMode = EditorBehaviorMode.Mode2D;
+            EnsureArtImported();
+            ConfigureIcons();
+        }
+
+        /// <summary>
+        /// 强制按 <see cref="ArtImportSettings"/> 的口径重新导入三张图。
+        /// 不做这一步的话，如果美术先于 AssetPostprocessor 落进工程（或 .meta 已存在），
+        /// 就会沿用旧导入参数（mipmap + 平台压缩），字标边缘会脏。
+        /// </summary>
+        static void EnsureArtImported()
+        {
+            foreach (var p in ArtImportSettings.ArtPaths)
+            {
+                if (!File.Exists(p)) { Debug.LogWarning("[ILVES-BUILD] 美术文件缺失：" + p); continue; }
+                AssetDatabase.ImportAsset(p, ImportAssetOptions.ForceUpdate);
+            }
+            AssetDatabase.Refresh();
+        }
+
+        /// <summary>
+        /// 应用图标：工程里只维护一张母版 <c>Assets/Art/icon.png</c>（1024×1024），
+        /// 构建时按 Unity 给每个平台开出的槽位数组统一指过去，缩放交给 Unity。
+        /// 这样换图标只换那一张图，不用逐槽位手工拖。
+        /// </summary>
+        static void ConfigureIcons()
+        {
+            var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(IconPath);
+            if (icon == null)
+            {
+                Debug.LogWarning("[ILVES-BUILD] 缺少图标 " + IconPath + "，跳过图标设置（会用 Unity 默认图标）");
+                return;
+            }
+            int slots = 0;
+            slots += ApplyIcons(NamedBuildTarget.Standalone, icon);
+            slots += ApplyIcons(NamedBuildTarget.Android, icon);
+            Debug.Log("[ILVES-BUILD] 图标已设置 " + IconPath + " (" + icon.width + "×" + icon.height + ") → slots=" + slots);
+        }
+
+        static int ApplyIcons(NamedBuildTarget target, Texture2D icon)
+        {
+            int[] sizes;
+            try { sizes = PlayerSettings.GetIconSizes(target, IconKind.Application); }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[ILVES-BUILD] 读取 " + target + " 图标槽位失败（跳过）：" + e.Message);
+                return 0;
+            }
+            if (sizes == null || sizes.Length == 0) return 0;
+            var arr = new Texture2D[sizes.Length];
+            for (int i = 0; i < arr.Length; i++) arr[i] = icon;
+            PlayerSettings.SetIcons(target, arr, IconKind.Application);
+            return arr.Length;
         }
 
         static void CreateScene()
