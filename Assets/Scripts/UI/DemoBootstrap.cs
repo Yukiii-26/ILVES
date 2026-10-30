@@ -523,6 +523,15 @@ namespace Ilves.UI
             if (_page < _pages.Count - 1) NextPage();
         }
 
+        /// <summary>滚轮向上回看上一页（只在多页且不是第一页时有效）。</summary>
+        void PageBackward()
+        {
+            if (_page <= 0) return;
+            _page--;
+            _reveal = PageText().Length;
+            _textDone = true;
+        }
+
         /// <summary>
         /// 统一文字真实高度：行数按 CalcHeight 的行数比例（准），行距用实测真实值（30.4082 @ 22px）。
         /// CalcHeight 对中文每行会高估约 6px（实测 CalcHeight("国")=36.41 vs 真实行距 30.4082），
@@ -610,7 +619,7 @@ namespace Ilves.UI
             for (int i = 0; i < blocks.Count; i++)
             {
                 string candidate = page.Length == 0 ? blocks[i] : page.ToString() + joins[i] + blocks[i];
-                if (page.Length == 0 || MeasureText(style, candidate, w) <= maxH)
+                if (page.Length == 0 || TrueTextHeight(style, candidate, w) <= maxH)
                 {
                     page.Length = 0;
                     page.Append(candidate);
@@ -662,7 +671,7 @@ namespace Ilves.UI
             while (lo <= hi)
             {
                 int mid = (lo + hi) / 2;
-                if (MeasureText(style, s.Substring(start, mid), w) <= maxH)
+                if (TrueTextHeight(style, s.Substring(start, mid), w) <= maxH)
                 { best = mid; lo = mid + 1; }
                 else hi = mid - 1;
             }
@@ -713,10 +722,10 @@ namespace Ilves.UI
             _reveal = 0f;
             _textDone = string.IsNullOrEmpty(_pages[0]);
 
-            // 分页自检：用 MeasureText 复核，任何一页高于视口才报警（正常永远不应触发）
+            // 分页自检：用真实渲染高度复核，任何一页高于视口才报警（正常永远不应触发）
             for (int i = 0; i < _pages.Count; i++)
             {
-                float ph = MeasureText(_body, _pages[i], w);
+                float ph = TrueTextHeight(_body, _pages[i], w);
                 if (ph > viewport.height + 1f)
                     Debug.LogWarning("[ILVES-PAGES] 页高超视口 node=" + (node != null ? node.id : "?")
                                      + " page=" + (i + 1) + " h=" + Mathf.RoundToInt(ph)
@@ -1445,18 +1454,22 @@ namespace Ilves.UI
                 ? pageText
                 : pageText.Substring(0, Mathf.Clamp(Mathf.FloorToInt(_reveal), 0, pageText.Length));
             var viewport = BodyViewport(node);
-            // 统一走 Label()：按 CalcHeight 自动加高，绝不把文字下沿切掉（分页负责让正常情况下不溢出）
-            Label(viewport, visible, _body);
+            // 正文**不能**用 Label()：那个原语会按 CalcHeight（对中文每行高估约 6px）自动加高矩形，
+            // 一页 10 行就会被撑高 48px，正文下沿直接压到选项上（用户报的"文本多时被选项挡住"就是这个）。
+            // 分页已经用真实行距算过页高，这里按真实渲染高度画、并以视口高度兜底裁切。
+            LabelClipV(viewport, visible, _body);
 
             float cy = H - 236f;   // 选项区上移 14px，给正文多一行空间
             bool canClick = interactive && !_profileOpen;
+            // 提示行固定放左下角：放在选项区上方会被选项/正文压住（用户 2026-10-30 反馈）
+            var hintRect = new Rect(bx, H - 26f, bw, 22f);
             if (!IsLastPage)
             {
-                Label(new Rect(bx, cy + 8, bw, 24), "▾  继续（" + (_page + 1) + " / " + _pages.Count + "）", _hint);
+                Label(hintRect, "▾  继续（" + (_page + 1) + " / " + _pages.Count + "）　滚轮 / 空格 / 点击", _hint);
             }
             else if (!_textDone)
             {
-                Label(new Rect(bx, cy + 8, bw, 24), "点击 / 空格 跳过", _hint);
+                Label(hintRect, "点击 / 空格 跳过", _hint);
             }
             else if (_choices != null && _choices.Count > 0)
             {
@@ -1465,23 +1478,28 @@ namespace Ilves.UI
             }
             else
             {
-                Label(new Rect(bx, cy + 8, bw, 24), "▾  空格 / 点击 继续", _hint);
+                Label(hintRect, "▾  空格 / 点击 继续", _hint);
             }
 
-            // 滚轮（指针在正文区内）翻页；任意方向都当作向后翻，避免 Event.delta 方向差异
+            // 滚轮翻页（指针在正文区内）：实测 Event.delta.y 在滚轮**向上**时为负，
+            // 所以 >0 = 向下 = 往后翻，<0 = 向上 = 回看上一页（方向 2026-10-30 校准过）
             if (canClick && Event.current.type == EventType.ScrollWheel && viewport.Contains(Event.current.mousePosition))
             {
-                PageForward();
+                if (Event.current.delta.y > 0f) PageForward(); else PageBackward();
                 Event.current.Use();
             }
 
             DrawSidebar(canClick);
 
-            if (canClick && Event.current.type == EventType.MouseDown && Event.current.button == 0 && !_overChoice)
+            if (canClick && !_overChoice && Event.current.type == EventType.MouseDown && Event.current.button == 0)
             {
                 Advance();
                 Event.current.Use();
             }
+            // 只在"这一帧"里压住点击推进。之前这个标记只在 EnterNode 重置，
+            // 而 DrawChoice 又是在 EnterNode 之后才把它置 true —— 于是点过一次选项后，
+            // 整个节点期间鼠标点击推进都失效（表现就是用户说的"有时候点击跳过不管用"）。
+            _overChoice = false;
         }
 
         void DrawChoice(Rect r, int index, StoryChoice choice, bool interactive)
@@ -2090,6 +2108,38 @@ namespace Ilves.UI
             GUI.EndGroup();
         }
 
+        /// <summary>
+        /// 真实渲染高度：用 GetCursorPixelPosition 量最后一行首字的 y，再加一行行距。
+        /// 这是渲染器自己的排版结果，比分页常用的 MeasureText（CalcHeight 行数比例 × 实测行距）更准；
+        /// 正文分页与正文绘制都用它，避免"页高估小了 → 最后一行被选项挡住或裁掉"。
+        /// </summary>
+        static float TrueTextHeight(GUIStyle style, string text, float w)
+        {
+            if (style == null || string.IsNullOrEmpty(text)) return 0f;
+            w = Mathf.Max(8f, w);
+            float lh = LineHeight(style, w);
+            if (lh < 1f) return MeasureText(style, text, w);
+            float yLast = style.GetCursorPixelPosition(new Rect(0f, 0f, w, 100000f), new GUIContent(text), text.Length - 1).y;
+            if (yLast < 0f || yLast > 90000f) return MeasureText(style, text, w);
+            return yLast + lh;
+        }
+
+        /// <summary>
+        /// 纵向也按视口裁切的文字（正文分页专用）：
+        /// 页高已按真实高度算好，正常情况一行都不会被切；这个裁切只是兜底——
+        /// 万一某页真的比视口高，也只会裁在视口下沿，**绝不压到下面的选项区**。
+        /// </summary>
+        static void LabelClipV(Rect r, string text, GUIStyle style)
+        {
+            if (string.IsNullOrEmpty(text) || r.width < 4f) return;
+            float need = TrueTextHeight(style, text, r.width);
+            float h = Mathf.Min(r.height, need + 2f);
+            if (h < 8f) h = 8f;
+            GUI.BeginGroup(new Rect(r.x, r.y, r.width, h));
+            GUI.Label(new Rect(0f, 0f, r.width, need + 2f), text, style);   // [text-primitive]
+            GUI.EndGroup();
+        }
+
         static void Fill(Rect r, Color c)
         {
             var old = GUI.color;
@@ -2194,8 +2244,9 @@ namespace Ilves.UI
                 var e = Event.current;
                 if (e.type == EventType.ScrollWheel && viewport.Contains(e.mousePosition))
                 {
-                    // Unity 里滚轮向下 = delta.y 为负；向下滚应当看后面的内容 → scroll 增大
-                    if (Mathf.Abs(e.delta.y) > 0.001f) { scroll -= Mathf.Sign(e.delta.y) * lineH * 1.5f; e.Use(); }
+                    // 方向按 Windows 实测校准（2026-10-30）：滚轮**向上**时 Event.delta.y 为**负**。
+                    // 向上滚应该回看前面的内容 → scroll 减小，所以这里是 +=（之前写反过，用户报过"方向是反的"）。
+                    if (Mathf.Abs(e.delta.y) > 0.001f) { scroll += Mathf.Sign(e.delta.y) * lineH * 1.5f; e.Use(); }
                 }
                 else if (e.type == EventType.KeyDown)
                 {
